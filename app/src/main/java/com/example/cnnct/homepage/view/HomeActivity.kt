@@ -1,0 +1,578 @@
+package com.example.cnnct.homepage.view
+
+import android.content.Intent
+import android.os.Bundle
+import android.util.Log
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.dp
+import com.example.cnnct.R
+import com.example.cnnct.auth.controller.LoginActivity
+import com.example.cnnct.chat.view.ChatActivity
+import com.example.cnnct.homepage.model.ChatSummary
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FieldPath
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.Query
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
+import androidx.compose.runtime.rememberCoroutineScope
+
+class HomeActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        setContent {
+            HomeScreen(onLogout = {
+                FirebaseAuth.getInstance().signOut()
+                Log.d("HomeActivity", "User logged out")
+                startActivity(Intent(this, LoginActivity::class.java))
+                finish()
+            })
+        }
+    }
+}
+
+@Composable
+fun BottomNavigationBar(currentScreen: String = "chats") {
+    val context = LocalContext.current
+
+    NavigationBar {
+        NavigationBarItem(
+            icon = { Icon(Icons.Default.Chat, contentDescription = "Chats") },
+            label = { Text("Chats") },
+            selected = currentScreen == "chats",
+            onClick = {
+                if (currentScreen != "chats") {
+                    context.startActivity(
+                        Intent(context, com.example.cnnct.homepage.view.HomeActivity::class.java)
+                    )
+                }
+            }
+        )
+        NavigationBarItem(
+            icon = { Icon(Icons.Default.Group, contentDescription = "Groups") },
+            label = { Text("Groups") },
+            selected = currentScreen == "groups",
+            onClick = {
+                if (currentScreen != "groups") {
+                    context.startActivity(
+                        Intent(context, com.example.cnnct.groups.view.GroupActivity::class.java)
+                    )
+                }
+            }
+        )
+        NavigationBarItem(
+            icon = { Icon(Icons.Default.Call, contentDescription = "Calls") },
+            label = { Text("Calls") },
+            selected = currentScreen == "calls",
+            onClick = {
+                if (currentScreen != "calls") {
+                    context.startActivity(
+                        Intent(context, com.example.cnnct.calls.view.CallsActivity::class.java)
+                    )
+                }
+            }
+        )
+        NavigationBarItem(
+            icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
+            label = { Text("Settings") },
+            selected = currentScreen == "settings",
+            onClick = {
+                if (currentScreen != "settings") {
+                    context.startActivity(
+                        Intent(context, com.example.cnnct.settings.view.SettingsActivity::class.java)
+                    )
+                }
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HomeScreen(onLogout: () -> Unit) {
+    val context = LocalContext.current
+    val db = remember { FirebaseFirestore.getInstance() }
+    val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: ""
+
+    var chatSummaries by remember { mutableStateOf<List<ChatSummary>>(emptyList()) }
+    var userMap by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var searchQuery by remember { mutableStateOf("") }
+
+    // Presence state
+    var onlineMap by remember { mutableStateOf<Map<String, Long?>>(emptyMap()) }
+    var presenceRegs by remember { mutableStateOf<List<ListenerRegistration>>(emptyList()) }
+
+    var showNewChatSheet by remember { mutableStateOf(false) }
+    var searchResults by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    var menuExpanded by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    // ==== Real-time chats (HYBRID: per-user previews + global fallback) ====
+    // 1) Listen to /userChats/{me}/chats for per-user last message (respects delete-for-me)
+    // 2) Always fetch my membership from /chats, and merge:
+    //    - If a preview exists for a chat, use it
+    //    - Otherwise fall back to the chat doc’s lastMessage* (until I open the chat once)
+    DisposableEffect(currentUserId) {
+        if (currentUserId.isBlank()) return@DisposableEffect onDispose {}
+        val reg: ListenerRegistration =
+            db.collection("userChats")
+                .document(currentUserId)
+                .collection("chats")
+                .orderBy("lastMessageTimestamp", Query.Direction.DESCENDING)
+                .addSnapshotListener { snap, err ->
+                    if (err != null) {
+                        Log.e("HomeScreen", "listen previews error", err)
+                        chatSummaries = emptyList()
+                        return@addSnapshotListener
+                    }
+
+                    val previewDocs = snap?.documents ?: emptyList()
+                    val previewById = previewDocs.associateBy { it.id }
+
+                    scope.launch {
+                        try {
+                            // Fetch ALL chats I’m a member of
+                            val chatsSnap = withContext(Dispatchers.IO) {
+                                db.collection("chats")
+                                    .whereArrayContains("members", currentUserId)
+                                    .get()
+                                    .await()
+                            }
+
+                            val merged = chatsSnap.documents.mapNotNull { meta ->
+                                try {
+                                    val chatId = meta.id
+                                    val preview = previewById[chatId]
+
+                                    val groupName = meta.getString("groupName")
+                                    val members = (meta.get("members") as? List<String>) ?: emptyList()
+                                    val type = meta.getString("type") ?: "private"
+
+                                    val text = preview?.getString("lastMessageText")
+                                        ?: meta.getString("lastMessageText")
+                                        ?: ""
+
+                                    val ts = preview?.getTimestamp("lastMessageTimestamp")
+                                        ?: meta.getTimestamp("lastMessageTimestamp")
+
+                                    val senderId = preview?.getString("lastMessageSenderId")
+                                        ?: meta.getString("lastMessageSenderId")
+
+                                    val statusRaw = preview?.getString("lastMessageStatus")
+                                        ?: meta.getString("lastMessageStatus")
+                                    val isReadLegacy = meta.getBoolean("lastMessageIsRead") ?: false
+                                    val status = statusRaw ?: if (isReadLegacy) "read" else null
+
+                                    ChatSummary(
+                                        id = chatId,
+                                        type = type,
+                                        members = members,
+                                        groupName = groupName,
+                                        lastMessageText = text,
+                                        lastMessageTimestamp = ts,
+                                        lastMessageSenderId = senderId,
+                                        createdAt = meta.getTimestamp("createdAt"),
+                                        updatedAt = meta.getTimestamp("updatedAt"),
+                                        lastMessageIsRead = (status == "read"),
+                                        lastMessageStatus = status
+                                    )
+                                } catch (e: Exception) {
+                                    Log.e("HomeScreen", "merge chat ${meta.id}", e); null
+                                }
+                            }
+
+                            // Sort by last message time (desc), fallback to updatedAt
+                            val sorted = merged.sortedByDescending {
+                                it.lastMessageTimestamp?.toDate()?.time
+                                    ?: it.updatedAt?.toDate()?.time
+                                    ?: Long.MIN_VALUE
+                            }
+                            chatSummaries = sorted
+                        } catch (e: Exception) {
+                            Log.e("HomeScreen", "merge previews + chats failed", e)
+                            chatSummaries = emptyList()
+                        }
+                    }
+                }
+        onDispose { reg.remove() }
+    }
+
+    // Build userMap + presence listeners when chats change
+    LaunchedEffect(chatSummaries) {
+        val targets = chatSummaries
+            .flatMap { it.members + (it.lastMessageSenderId ?: "") }
+            .filter { it.isNotBlank() && it != currentUserId }
+            .distinct()
+
+        // Names (one-shot)
+        val nameMap = mutableMapOf<String, String>()
+        for (chunk in targets.chunked(10)) {
+            try {
+                val snap = db.collection("users")
+                    .whereIn(FieldPath.documentId(), chunk)
+                    .get()
+                    .await()
+                snap.documents.forEach { doc ->
+                    nameMap[doc.id] = doc.getString("displayName") ?: "Unknown"
+                }
+            } catch (e: Exception) {
+                Log.e("HomeScreen", "userMap chunk failed", e)
+            }
+        }
+        userMap = nameMap
+
+        // Presence (real-time)
+        presenceRegs.forEach { it.remove() }
+        presenceRegs = emptyList()
+
+        val newOnline = onlineMap.toMutableMap()
+        val regs = mutableListOf<ListenerRegistration>()
+        for (chunk in targets.chunked(10)) {
+            if (chunk.isEmpty()) continue
+            val reg = db.collection("users")
+                .whereIn(FieldPath.documentId(), chunk)
+                .addSnapshotListener { snap, err ->
+                    if (err != null || snap == null) return@addSnapshotListener
+                    val m = newOnline.toMutableMap()
+                    for (doc in snap.documents) {
+                        val ts = doc.getTimestamp("lastOnlineAt")?.toDate()?.time
+                        m[doc.id] = ts
+                    }
+                    onlineMap = m
+                }
+            regs += reg
+        }
+        presenceRegs = regs
+    }
+
+    // Recipient-side delivery polling (foreground)
+    val pollSeconds = remember { 25 }
+    LaunchedEffect(pollSeconds, currentUserId) {
+        if (currentUserId.isBlank()) return@LaunchedEffect
+        while (true) {
+            try {
+                com.example.cnnct.homepage.controller.HomePController
+                    .promoteIncomingLastMessagesToDelivered(currentUserId, maxPerRun = 25)
+            } catch (e: Exception) {
+                Log.e("HomeScreen", "deliver-poll pass failed", e)
+            }
+            kotlinx.coroutines.delay(pollSeconds * 1000L)
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Image(
+                        painter = painterResource(R.drawable.logo2),
+                        contentDescription = "CNNCT Logo",
+                        modifier = Modifier
+                            .height(40.dp)
+                            .offset(y = 4.dp)
+                    )
+                },
+                actions = {
+                    IconButton(onClick = {
+                        focusRequester.requestFocus()
+                        keyboardController?.show()
+                    }) {
+                        Icon(Icons.Default.Search, contentDescription = "Search")
+                    }
+
+                    // ⋮ menu with Settings + Logout
+                    Box {
+                        IconButton(onClick = { menuExpanded = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "Menu")
+                        }
+                        DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Settings") },
+                                leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                                onClick = {
+                                    menuExpanded = false
+                                    context.startActivity(
+                                        Intent(context, com.example.cnnct.settings.view.SettingsActivity::class.java)
+                                    )
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Logout") },
+                                onClick = {
+                                    menuExpanded = false
+                                    onLogout()
+                                }
+                            )
+                        }
+                    }
+                }
+            )
+        },
+        bottomBar = { BottomNavigationBar(currentScreen = "chats") },
+        floatingActionButton = {
+            FloatingActionButton(onClick = { showNewChatSheet = true }) {
+                Icon(Icons.Default.Add, contentDescription = "New Chat")
+            }
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .padding(innerPadding)
+                .padding(horizontal = 16.dp)
+        ) {
+            Spacer(Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Search chats...") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .focusRequester(focusRequester),
+                shape = MaterialTheme.shapes.large,
+                singleLine = true,
+                trailingIcon = {
+                    if (searchQuery.isNotBlank()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear Search")
+                        }
+                    }
+                }
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            Button(
+                onClick = { /* TODO */ },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800)),
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Archived Chats...") }
+
+            Spacer(Modifier.height(12.dp))
+
+            val filtered = remember(chatSummaries, searchQuery, userMap, currentUserId) {
+                if (searchQuery.isBlank()) chatSummaries else {
+                    chatSummaries.filter { chat ->
+                        val name = when (chat.type) {
+                            "group" -> chat.groupName ?: ""
+                            "private" -> {
+                                val other = chat.members.firstOrNull { it != currentUserId }
+                                userMap[other] ?: ""
+                            }
+                            else -> ""
+                        }
+                        name.contains(searchQuery, ignoreCase = true)
+                    }
+                }
+            }
+
+            if (filtered.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No chats found", style = MaterialTheme.typography.bodyLarge)
+                }
+            } else {
+                LazyColumn {
+                    items(filtered, key = { it.id }) { chat ->
+                        ChatListItem(
+                            chatSummary = chat,
+                            currentUserId = currentUserId,
+                            userMap = userMap,
+                            onClick = {
+                                val intent = Intent(context, ChatActivity::class.java)
+                                    .putExtra("chatId", chat.id)
+                                context.startActivity(intent)
+                            },
+                            onlineMap = onlineMap,            // presence map
+                            blockedUserIds = emptySet()       // wire when you add block logic
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // ========= NEW CHAT BOTTOM SHEET (FAB) =========
+    if (showNewChatSheet) {
+        ModalBottomSheet(onDismissRequest = { showNewChatSheet = false }) {
+            var query by remember { mutableStateOf("") }
+            Column(Modifier.padding(16.dp)) {
+                Text("Start new chat", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { q ->
+                        query = q
+                        if (q.isBlank()) {
+                            searchResults = emptyList()
+                        } else {
+                            // prefix search on displayName
+                            db.collection("users")
+                                .whereGreaterThanOrEqualTo("displayName", q)
+                                .whereLessThanOrEqualTo("displayName", q + '\uf8ff')
+                                .limit(20)
+                                .get()
+                                .addOnSuccessListener { snap ->
+                                    searchResults = snap.documents.mapNotNull { d ->
+                                        val uid = d.id
+                                        val name = d.getString("displayName")
+                                        if (!name.isNullOrBlank() && uid != currentUserId) uid to name else null
+                                    }
+                                }
+                                .addOnFailureListener {
+                                    Log.e("HomeScreen", "search failed", it)
+                                    searchResults = emptyList()
+                                }
+                        }
+                    },
+                    placeholder = { Text("Search people by display name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(12.dp))
+
+                LazyColumn {
+                    items(searchResults) { (uid, name) ->
+                        ListItem(
+                            headlineContent = { Text(name) },
+                            supportingContent = { Text(uid) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    // create-or-get private chat (with fallback & backfill)
+                                    createOrGetPrivateChat(db, currentUserId, uid) { chatId ->
+                                        if (chatId != null) {
+                                            val intent = Intent(context, ChatActivity::class.java)
+                                                .putExtra("chatId", chatId)
+                                            context.startActivity(intent)
+                                            showNewChatSheet = false
+                                        } else {
+                                            Log.e("HomeScreen", "Failed to open/create chat with $uid")
+                                        }
+                                    }
+                                }
+                                .padding(vertical = 8.dp)
+                        )
+                        Divider()
+                    }
+                }
+                Spacer(Modifier.height(24.dp))
+            }
+        }
+    }
+}
+
+/* ============================================================
+   Private chat open/create with legacy fallback & backfill
+   ============================================================ */
+private fun createOrGetPrivateChat(
+    db: FirebaseFirestore,
+    me: String,
+    other: String,
+    onResult: (String?) -> Unit
+) {
+    if (me.isBlank() || other.isBlank() || me == other) {
+        onResult(null); return
+    }
+    val pairKey = listOf(me, other).sorted().joinToString("#")
+
+    // 1) Fast path: by pairKey (and membership, to satisfy rules)
+    db.collection("chats")
+        .whereArrayContains("members", me)
+        .whereEqualTo("type", "private")
+        .whereEqualTo("pairKey", pairKey)
+        .limit(1)
+        .get()
+        .addOnSuccessListener { snap ->
+            if (!snap.isEmpty) {
+                onResult(snap.documents.first().id)
+                return@addOnSuccessListener
+            }
+
+            // 2) Fallback: look at my private chats, filter for the peer (legacy chats without pairKey)
+            db.collection("chats")
+                .whereArrayContains("members", me)
+                .whereEqualTo("type", "private")
+                .limit(50) // tune if needed
+                .get()
+                .addOnSuccessListener { s2 ->
+                    val existing = s2.documents.firstOrNull { d ->
+                        (d.get("members") as? List<*>)?.contains(other) == true
+                    }
+                    if (existing != null) {
+                        // Backfill pairKey for future fast lookups
+                        if (!existing.contains("pairKey")) {
+                            existing.reference.update("pairKey", pairKey)
+                                .addOnFailureListener { e ->
+                                    Log.w("HomeScreen", "pairKey backfill failed for ${existing.id}", e)
+                                }
+                        }
+                        onResult(existing.id)
+                    } else {
+                        // 3) Create new
+                        val data = hashMapOf(
+                            "type" to "private",
+                            "members" to listOf(me, other),
+                            "pairKey" to pairKey,
+                            "lastMessageText" to "",
+                            "lastMessageTimestamp" to null,
+                            "lastMessageSenderId" to null,
+                            "lastMessageIsRead" to false,
+                            "createdAt" to com.google.firebase.Timestamp.now(),
+                            "updatedAt" to com.google.firebase.Timestamp.now()
+                        )
+                        db.collection("chats")
+                            .add(data)
+                            .addOnSuccessListener { ref -> onResult(ref.id) }
+                            .addOnFailureListener { e ->
+                                Log.e("HomeScreen", "create chat failed", e)
+                                onResult(null)
+                            }
+                    }
+                }
+                .addOnFailureListener {
+                    Log.e("HomeScreen", "fallback query failed", it)
+                    onResult(null)
+                }
+        }
+        .addOnFailureListener {
+            Log.e("HomeScreen", "pairKey query failed", it)
+            onResult(null)
+        }
+}

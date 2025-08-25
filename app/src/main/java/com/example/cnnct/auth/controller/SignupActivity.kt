@@ -6,15 +6,17 @@ import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import com.example.cnnct.homepage.view.HomeActivity
 import com.example.cnnct.R
 import com.example.cnnct.auth.view.SignupForm
+import com.example.cnnct.homepage.view.HomeActivity
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 
 class SignupActivity : ComponentActivity() {
 
@@ -25,6 +27,8 @@ class SignupActivity : ComponentActivity() {
     companion object {
         private const val RC_SIGN_IN = 9001
         private const val TAG = "SignupActivity"
+        private const val ERR_PHONE_TAKEN = "PHONE_TAKEN"
+        private const val ERR_USERNAME_TAKEN = "USERNAME_TAKEN"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -33,24 +37,25 @@ class SignupActivity : ComponentActivity() {
         auth = FirebaseAuth.getInstance()
         firestore = FirebaseFirestore.getInstance()
 
-        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+        val gSO = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestIdToken(getString(R.string.default_web_client_id))
             .requestEmail()
             .build()
 
-        googleSignInClient = GoogleSignIn.getClient(this, gso)
+        googleSignInClient = GoogleSignIn.getClient(this, gSO)
 
         setContent {
             SignupForm(
-                onSignupClick = { name, displayName, email, phone, password, confirmPassword ->
-                    if (name.isBlank() || displayName.isBlank() || email.isBlank() || phone.isBlank() ||
-                        password.isBlank() || confirmPassword.isBlank()
-                    ) {
-                        Toast.makeText(this, "Please fill in all fields", Toast.LENGTH_SHORT).show()
-                    } else if (password != confirmPassword) {
-                        Toast.makeText(this, "Passwords do not match", Toast.LENGTH_SHORT).show()
-                    } else {
-                        signupUser(name, displayName, email, phone, password)
+                onSignupClick = { name, displayName, email, phoneRaw, password, confirmPassword ->
+                    val phone = normalizePhone(phoneRaw) // e.g., "03123456" (8 digits)
+                    when {
+                        name.isBlank() || displayName.isBlank() || email.isBlank() || phone.isBlank()
+                                || password.isBlank() || confirmPassword.isBlank() -> {
+                            toast("Please fill in all fields")
+                        }
+                        password != confirmPassword -> toast("Passwords do not match")
+                        phone.length != 8 -> toast("Phone must be 8 digits (e.g., 03-123456)")
+                        else -> signupUser(name.trim(), displayName.trim(), email.trim(), phone, password)
                     }
                 },
                 onGoogleSignupClick = { signInWithGoogle() },
@@ -62,76 +67,101 @@ class SignupActivity : ComponentActivity() {
         }
     }
 
-    private fun signupUser(name: String, displayName: String, email: String, phone: String, password: String) {
+    private fun normalizePhone(input: String): String {
+        // Keep digits only, expect 8-digit local number
+        return input.filter { it.isDigit() }.take(8)
+    }
+
+    private fun normalizeDisplayName(input: String): String = input.trim().lowercase()
+
+    private fun signupUser(
+        name: String,
+        displayName: String,
+        email: String,
+        phone: String,
+        password: String
+    ) {
         auth.createUserWithEmailAndPassword(email, password)
             .addOnCompleteListener { task ->
-                if (task.isSuccessful) {
-                    val user = auth.currentUser
-                    val uid = user?.uid ?: return@addOnCompleteListener
+                if (!task.isSuccessful) {
+                    toast("Registration failed: ${task.exception?.localizedMessage}")
+                    return@addOnCompleteListener
+                }
 
-                    // Ensure phone unique
-                    firestore.collection("phones").document(phone).get()
-                        .addOnSuccessListener { doc ->
-                            if (doc.exists()) {
-                                Toast.makeText(this, "Phone already registered", Toast.LENGTH_SHORT).show()
-                                user?.delete()
-                                return@addOnSuccessListener
-                            }
+                val user = auth.currentUser
+                val uid = user?.uid
+                if (uid == null) {
+                    toast("Registration failed: user not available")
+                    return@addOnCompleteListener
+                }
 
-                            // Check displayName uniqueness (as before)...
-                            firestore.collection("users")
-                                .get()
-                                .addOnSuccessListener { querySnapshot ->
-                                    val displayNames = querySnapshot.documents.mapNotNull {
-                                        it.getString("displayName")?.lowercase()?.trim()
-                                    }
+                // Refs
+                val userRef = firestore.collection("users").document(uid)
+                val phoneRef = firestore.collection("phones").document(phone) // unique by doc id
+                val usernameKey = normalizeDisplayName(displayName)
+                val usernameRef = firestore.collection("usernames").document(usernameKey)
 
-                                    if (displayNames.contains(displayName.lowercase().trim())) {
-                                        Toast.makeText(this, "Display name already taken.", Toast.LENGTH_SHORT).show()
-                                        user?.delete()
-                                        return@addOnSuccessListener
-                                    }
+                val userDoc = hashMapOf(
+                    "name" to name,
+                    "displayName" to displayName,
+                    "email" to email,
+                    "phoneNumber" to phone,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
 
-                                    val userMap = hashMapOf(
-                                        "name" to name,
-                                        "displayName" to displayName,
-                                        "email" to email,
-                                        "phoneNumber" to phone
-                                    )
+                // Transaction to ensure atomicity & uniqueness
+                firestore.runTransaction { tx ->
+                    // 1) Unique phone
+                    if (tx.get(phoneRef).exists()) {
+                        throw IllegalStateException(ERR_PHONE_TAKEN)
+                    }
+                    // 2) Unique username/displayName
+                    if (tx.get(usernameRef).exists()) {
+                        throw IllegalStateException(ERR_USERNAME_TAKEN)
+                    }
 
-                                    firestore.collection("users").document(uid)
-                                        .set(userMap)
-                                        .addOnSuccessListener {
-                                            firestore.collection("phones").document(phone)
-                                                .set(mapOf("uid" to uid))
-
-                                            user.sendEmailVerification()
-                                                .addOnCompleteListener { emailTask ->
-                                                    if (emailTask.isSuccessful) {
-                                                        Toast.makeText(this, "Verification email sent. Check inbox.", Toast.LENGTH_LONG).show()
-                                                        startActivity(Intent(this, LoginActivity::class.java))
-                                                        finish()
-                                                    }
-                                                }
-                                        }
-                                }
+                    // 3) Writes
+                    tx.set(userRef, userDoc, SetOptions.merge())
+                    // phones/{phone} must contain { uid, email } to satisfy rules
+                    tx.set(phoneRef, mapOf("uid" to uid, "email" to email))
+                    // usernames/{displayName} -> reserve
+                    tx.set(usernameRef, mapOf("uid" to uid))
+                    null
+                }.addOnSuccessListener {
+                    // Send verification email
+                    user.sendEmailVerification()
+                        .addOnSuccessListener {
+                            toast("Verification email sent. Check your inbox.")
+                            startActivity(Intent(this, LoginActivity::class.java))
+                            finish()
                         }
-                } else {
-                    Toast.makeText(this, "Registration failed: ${task.exception?.message}", Toast.LENGTH_SHORT).show()
+                        .addOnFailureListener { e ->
+                            toast("User created but failed to send verification: ${e.localizedMessage}")
+                            startActivity(Intent(this, LoginActivity::class.java))
+                            finish()
+                        }
+                }.addOnFailureListener { e ->
+                    Log.e(TAG, "Transaction failed", e)
+                    when (e.message) {
+                        ERR_PHONE_TAKEN -> toast("Phone already registered")
+                        ERR_USERNAME_TAKEN -> toast("Display name already taken")
+                        else -> toast("Failed to save profile: ${e.localizedMessage}")
+                    }
+                    // Roll back auth user to keep consistent
+                    auth.currentUser?.delete()?.addOnCompleteListener {
+                        auth.signOut()
+                    }
                 }
             }
     }
-
-
-
-
-
 
     private fun signInWithGoogle() {
         val signInIntent = googleSignInClient.signInIntent
         startActivityForResult(signInIntent, RC_SIGN_IN)
     }
 
+    @Deprecated("onActivityResult is deprecated; fine for this capstone, or migrate later.")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
 
@@ -139,11 +169,15 @@ class SignupActivity : ComponentActivity() {
             val task = GoogleSignIn.getSignedInAccountFromIntent(data)
             try {
                 val account = task.getResult(Exception::class.java)
-                account?.idToken?.let { firebaseAuthWithGoogle(it) }
-                    ?: Toast.makeText(this, "Google sign-in failed: No ID token", Toast.LENGTH_SHORT).show()
+                val idToken = account?.idToken
+                if (idToken != null) {
+                    firebaseAuthWithGoogle(idToken)
+                } else {
+                    toast("Google sign-in failed: No ID token")
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "Google sign-in failed", e)
-                Toast.makeText(this, "Google sign-in failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                toast("Google sign-in failed: ${e.message}")
             }
         }
     }
@@ -152,46 +186,47 @@ class SignupActivity : ComponentActivity() {
         val credential = GoogleAuthProvider.getCredential(idToken, null)
         auth.signInWithCredential(credential)
             .addOnCompleteListener(this) { task ->
-                if (task.isSuccessful) {
-                    val user = auth.currentUser
-                    user?.let {
-                        val userId = it.uid
-                        val userDocRef = firestore.collection("users").document(userId)
+                if (!task.isSuccessful) {
+                    toast("Authentication failed: ${task.exception?.localizedMessage}")
+                    return@addOnCompleteListener
+                }
 
-                        userDocRef.get()
-                            .addOnSuccessListener { document ->
-                                if (!document.exists()) {
-                                    // Create basic user document
-                                    val userMap = hashMapOf(
-                                        "displayName" to (it.displayName ?: ""),
-                                        "email" to (it.email ?: "")
-                                    )
-                                    userDocRef.set(userMap)
-                                        .addOnSuccessListener {
-                                            Log.d(TAG, "User doc created. Checking completeness...")
-                                            checkUserProfileAndRedirect(userId)
-                                        }
-                                        .addOnFailureListener { e ->
-                                            Toast.makeText(this, "Failed to create user doc", Toast.LENGTH_SHORT).show()
-                                            Log.e(TAG, "Firestore write error", e)
-                                        }
-                                } else {
-                                    Log.d(TAG, "User doc exists. Checking completeness...")
+                val user = auth.currentUser ?: run {
+                    toast("Authentication failed: user not available")
+                    return@addOnCompleteListener
+                }
+                val userId = user.uid
+                val userDocRef = firestore.collection("users").document(userId)
+
+                userDocRef.get()
+                    .addOnSuccessListener { document ->
+                        if (!document.exists()) {
+                            val userMap = hashMapOf(
+                                "displayName" to (user.displayName ?: ""),
+                                "email" to (user.email ?: ""),
+                                "createdAt" to FieldValue.serverTimestamp(),
+                                "updatedAt" to FieldValue.serverTimestamp()
+                            )
+                            userDocRef.set(userMap)
+                                .addOnSuccessListener {
+                                    Log.d(TAG, "User doc created for Google account.")
                                     checkUserProfileAndRedirect(userId)
                                 }
-                            }
-                            .addOnFailureListener { e ->
-                                Toast.makeText(this, "Error checking user doc", Toast.LENGTH_SHORT).show()
-                                Log.e(TAG, "Firestore fetch error", e)
-                            }
+                                .addOnFailureListener { e ->
+                                    Log.e(TAG, "Firestore write error", e)
+                                    toast("Failed to create user profile")
+                                }
+                        } else {
+                            Log.d(TAG, "User doc exists. Checking completeness...")
+                            checkUserProfileAndRedirect(userId)
+                        }
                     }
-                } else {
-                    Toast.makeText(this, "Authentication failed: ${task.exception?.message}", Toast.LENGTH_SHORT).show()
-                }
+                    .addOnFailureListener { e ->
+                        Log.e(TAG, "Firestore fetch error", e)
+                        toast("Error checking user doc")
+                    }
             }
     }
-
-
 
     private fun checkUserProfileAndRedirect(uid: String) {
         firestore.collection("users").document(uid).get()
@@ -204,12 +239,14 @@ class SignupActivity : ComponentActivity() {
                 } else {
                     startActivity(Intent(this, HomeActivity::class.java))
                 }
-
                 finish()
             }
             .addOnFailureListener {
-                Toast.makeText(this, "Error checking profile data", Toast.LENGTH_SHORT).show()
+                toast("Error checking profile data")
             }
     }
 
+    private fun toast(msg: String) {
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+    }
 }

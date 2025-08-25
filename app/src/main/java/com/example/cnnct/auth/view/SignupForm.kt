@@ -12,9 +12,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.*
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.KeyboardType
 import com.example.cnnct.R
 
 @Composable
@@ -26,16 +29,16 @@ fun SignupForm(
     var name by remember { mutableStateOf("") }
     var displayName by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
-    var phone by remember { mutableStateOf("") }
+    // Store phone as digits only; render formatted
+    var phoneDigits by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
 
-    fun formatPhoneInput(input: String): String {
-        // Only allow digits, max 8
-        val digits = input.filter { it.isDigit() }.take(8)
-        return if (digits.length > 2) {
-            digits.substring(0, 2) + "-" + digits.substring(2)
+    fun formatPhoneForUi(digitsOnly: String): String {
+        val digits = digitsOnly.filter { it.isDigit() }.take(8)
+        return if (digits.length >= 2) {
+            digits.substring(0, 2) + if (digits.length > 2) "-" + digits.substring(2) else "-"
         } else digits
     }
 
@@ -89,8 +92,9 @@ fun SignupForm(
             value = email,
             onValueChange = { email = it },
             label = { Text("Email") },
-            keyboardOptions = KeyboardOptions.Default.copy(
-                keyboardType = KeyboardType.Email
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Email,
+                imeAction = ImeAction.Next
             ),
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
@@ -110,10 +114,17 @@ fun SignupForm(
                 color = MaterialTheme.colorScheme.onSurface
             )
             OutlinedTextField(
-                value = formatPhoneInput(phone),
-                onValueChange = { phone = formatPhoneInput(it) },
+                value = formatPhoneForUi(phoneDigits),
+                onValueChange = { input ->
+                    // Keep digits only internally
+                    phoneDigits = input.filter { it.isDigit() }.take(8)
+                },
                 label = { Text("Phone (03-123456)") },
                 singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Number,
+                    imeAction = ImeAction.Next
+                ),
                 modifier = Modifier.fillMaxWidth()
             )
         }
@@ -124,8 +135,9 @@ fun SignupForm(
             value = password,
             onValueChange = { password = it },
             label = { Text("Password") },
-            keyboardOptions = KeyboardOptions.Default.copy(
-                keyboardType = KeyboardType.Password
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Password,
+                imeAction = ImeAction.Next
             ),
             visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
             trailingIcon = {
@@ -143,8 +155,9 @@ fun SignupForm(
             value = confirmPassword,
             onValueChange = { confirmPassword = it },
             label = { Text("Confirm Password") },
-            keyboardOptions = KeyboardOptions.Default.copy(
-                keyboardType = KeyboardType.Password
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Password,
+                imeAction = ImeAction.Done
             ),
             visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
             singleLine = true,
@@ -155,8 +168,14 @@ fun SignupForm(
 
         Button(
             onClick = {
-                val normalizedPhone = phone.replace("-", "")
-                onSignupClick(name.trim(), displayName.trim(), email.trim(), normalizedPhone, password, confirmPassword)
+                onSignupClick(
+                    name.trim(),
+                    displayName.trim(),
+                    email.trim(),
+                    phoneDigits, // pass normalized (digits only)
+                    password,
+                    confirmPassword
+                )
             },
             modifier = Modifier
                 .fillMaxWidth()

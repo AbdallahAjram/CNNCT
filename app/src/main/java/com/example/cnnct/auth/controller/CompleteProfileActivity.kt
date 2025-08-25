@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.example.cnnct.homepage.view.HomeActivity
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 
@@ -44,32 +45,43 @@ class CompleteProfileActivity : ComponentActivity() {
     fun ProfileForm() {
         var name by remember { mutableStateOf("") }
         var displayName by remember { mutableStateOf("") }
-        var phone by remember { mutableStateOf("") }
-        var phoneLocked by remember { mutableStateOf(false) } // new flag
+        var originalDisplayName by remember { mutableStateOf<String?>(null) }
+
+        // Keep digits-only in state; render with dash in UI
+        var phoneDigits by remember { mutableStateOf("") }
+        var phoneLocked by remember { mutableStateOf(false) }
 
         val uid = auth.currentUser?.uid
 
         // Load existing profile data
         LaunchedEffect(uid) {
             if (!uid.isNullOrEmpty()) {
-                firestore.collection("users").document(uid).get()
+                firestore.collection("users").document(uid)
+                    .get()
                     .addOnSuccessListener { doc ->
                         name = doc.getString("name") ?: ""
                         displayName = doc.getString("displayName") ?: ""
+                        originalDisplayName = displayName.ifBlank { null }
+
                         val existingPhone = doc.getString("phoneNumber")
                         if (!existingPhone.isNullOrEmpty()) {
-                            phone = existingPhone
+                            phoneDigits = existingPhone.filter { it.isDigit() }.take(8)
                             phoneLocked = true
                         }
+                    }
+                    .addOnFailureListener {
+                        toast("Failed to load profile: ${it.localizedMessage}")
                     }
             }
         }
 
-        fun formatPhoneInput(input: String): String {
-            val digits = input.filter { it.isDigit() }.take(8)
-            return if (digits.length > 2) {
-                digits.substring(0, 2) + "-" + digits.substring(2)
-            } else digits
+        fun formatPhoneForUi(digitsOnly: String): String {
+            val digits = digitsOnly.filter { it.isDigit() }.take(8)
+            return when {
+                digits.length >= 3 -> digits.substring(0, 2) + "-" + digits.substring(2)
+                digits.length == 2 -> digits + "-"
+                else -> digits
+            }
         }
 
         Box(
@@ -100,6 +112,7 @@ class CompleteProfileActivity : ComponentActivity() {
                         value = name,
                         onValueChange = { name = it },
                         label = { Text("Full Name") },
+                        singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
 
@@ -107,6 +120,7 @@ class CompleteProfileActivity : ComponentActivity() {
                         value = displayName,
                         onValueChange = { displayName = it },
                         label = { Text("Display Name") },
+                        singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
 
@@ -120,9 +134,14 @@ class CompleteProfileActivity : ComponentActivity() {
                             style = MaterialTheme.typography.bodyLarge
                         )
                         OutlinedTextField(
-                            value = if (phoneLocked) formatPhoneInput(phone) else formatPhoneInput(phone),
-                            onValueChange = { if (!phoneLocked) phone = it },
-                            label = { Text("Phone (03-123456)") },
+                            value = formatPhoneForUi(phoneDigits),
+                            onValueChange = { input ->
+                                if (!phoneLocked) {
+                                    // keep digits-only in state; UI shows dashed
+                                    phoneDigits = input.filter { it.isDigit() }.take(8)
+                                }
+                            },
+                            label = { Text(if (phoneLocked) "Phone (locked)" else "Phone (03-123456)") },
                             singleLine = true,
                             enabled = !phoneLocked, // 🔒 disable if already set
                             modifier = Modifier.fillMaxWidth()
@@ -134,78 +153,84 @@ class CompleteProfileActivity : ComponentActivity() {
                     Button(
                         onClick = {
                             if (uid.isNullOrBlank()) {
-                                Toast.makeText(
-                                    this@CompleteProfileActivity,
-                                    "User not logged in",
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                                toast("User not logged in")
+                                return@Button
+                            }
+                            if (name.isBlank() || displayName.isBlank()) {
+                                toast("Name and display name are required")
+                                return@Button
+                            }
+                            if (!phoneLocked && phoneDigits.length != 8) {
+                                toast("Phone number must be 8 digits")
                                 return@Button
                             }
 
-                            val normalizedDisplayName = displayName.lowercase().trim()
-                            val normalizedPhone = phone.replace("-", "")
+                            val normalizedDisplay = displayName.trim()
+                            val usernameKey = normalizedDisplay.lowercase()
+                            val oldUsernameKey = originalDisplayName?.trim()?.lowercase()
 
-                            if (!phoneLocked && normalizedPhone.length != 8) {
-                                Toast.makeText(
-                                    this@CompleteProfileActivity,
-                                    "Phone number must be 8 digits",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                                return@Button
+                            val userRef = firestore.collection("users").document(uid)
+                            val usernameRef = firestore.collection("usernames").document(usernameKey)
+                            val oldUsernameRef =
+                                if (!oldUsernameKey.isNullOrBlank() && oldUsernameKey != usernameKey) {
+                                    firestore.collection("usernames").document(oldUsernameKey!!)
+                                } else null
+                            val phoneRef =
+                                if (!phoneLocked) firestore.collection("phones").document(phoneDigits) else null
+
+                            val userPatch = hashMapOf(
+                                "name" to name,
+                                "displayName" to normalizedDisplay,
+                                "email" to (auth.currentUser?.email ?: ""),
+                                "updatedAt" to FieldValue.serverTimestamp()
+                            ).apply {
+                                if (!phoneLocked) put("phoneNumber", phoneDigits)
                             }
 
-                            // Ensure displayName unique
-                            firestore.collection("users")
-                                .get()
-                                .addOnSuccessListener { snapshot ->
-                                    val displayNames = snapshot.documents
-                                        .filter { it.id != uid }
-                                        .mapNotNull { it.getString("displayName")?.lowercase()?.trim() }
-
-                                    if (displayNames.contains(normalizedDisplayName)) {
-                                        Toast.makeText(
-                                            this@CompleteProfileActivity,
-                                            "Display name already taken.",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                        return@addOnSuccessListener
-                                    }
-
-                                    val data = mutableMapOf(
-                                        "name" to name,
-                                        "displayName" to displayName,
-                                        "email" to (auth.currentUser?.email ?: "")
-                                    )
-
-                                    if (!phoneLocked) {
-                                        firestore.collection("phones").document(normalizedPhone).get()
-                                            .addOnSuccessListener { doc ->
-                                                if (doc.exists()) {
-                                                    Toast.makeText(
-                                                        this@CompleteProfileActivity,
-                                                        "Phone already registered",
-                                                        Toast.LENGTH_SHORT
-                                                    ).show()
-                                                    return@addOnSuccessListener
-                                                }
-
-                                                data["phoneNumber"] = normalizedPhone
-                                                firestore.collection("users").document(uid)
-                                                    .set(data, SetOptions.merge())
-                                                    .addOnSuccessListener {
-                                                        firestore.collection("phones").document(normalizedPhone)
-                                                            .set(mapOf("uid" to uid))
-                                                        gotoHome()
-                                                    }
-                                            }
-                                    } else {
-                                        firestore.collection("users").document(uid)
-                                            .set(data, SetOptions.merge())
-                                            .addOnSuccessListener {
-                                                gotoHome()
-                                            }
+                            // Atomic transaction: reserve username, (optionally) reserve phone, update user
+                            firestore.runTransaction { tx ->
+                                // Username reservation/validation
+                                val usernameSnap = tx.get(usernameRef)
+                                if (usernameSnap.exists()) {
+                                    val owner = usernameSnap.getString("uid")
+                                    if (owner != uid) {
+                                        throw IllegalStateException("DISPLAY_TAKEN")
                                     }
                                 }
+                                if (oldUsernameRef != null) {
+                                    val oldSnap = tx.get(oldUsernameRef)
+                                    if (oldSnap.exists()) {
+                                        val owner = oldSnap.getString("uid")
+                                        if (owner == uid) {
+                                            tx.delete(oldUsernameRef)
+                                        }
+                                    }
+                                }
+                                tx.set(usernameRef, mapOf("uid" to uid))
+
+                                // Phone uniqueness (first-time only) — write { uid, email }
+                                if (phoneRef != null) {
+                                    val phoneSnap = tx.get(phoneRef)
+                                    if (phoneSnap.exists()) {
+                                        throw IllegalStateException("PHONE_TAKEN")
+                                    }
+                                    val email = auth.currentUser?.email ?: ""
+                                    tx.set(phoneRef, mapOf("uid" to uid, "email" to email))
+                                }
+
+                                // Merge user profile fields
+                                tx.set(userRef, userPatch, SetOptions.merge())
+                                null
+                            }.addOnSuccessListener {
+                                toast("Profile updated")
+                                gotoHome()
+                            }.addOnFailureListener { e ->
+                                when (e.message) {
+                                    "DISPLAY_TAKEN" -> toast("Display name already taken.")
+                                    "PHONE_TAKEN" -> toast("Phone already registered.")
+                                    else -> toast("Failed to save: ${e.localizedMessage}")
+                                }
+                            }
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -217,8 +242,11 @@ class CompleteProfileActivity : ComponentActivity() {
     }
 
     private fun gotoHome() {
-        Toast.makeText(this, "Profile updated", Toast.LENGTH_SHORT).show()
         startActivity(Intent(this, HomeActivity::class.java))
         finish()
+    }
+
+    private fun toast(msg: String) {
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
     }
 }

@@ -429,61 +429,141 @@ fun HomeScreen(onLogout: () -> Unit) {
     }
 
     // ========= NEW CHAT BOTTOM SHEET (FAB) =========
+    // ========= NEW CHAT BOTTOM SHEET (FAB) =========
     if (showNewChatSheet) {
+        data class Person(val uid: String, val name: String, val phoneDigits: String?)
+
+        fun maskPhone(d: String?): String? {
+            if (d.isNullOrBlank()) return null
+            val digits = d.filter { it.isDigit() }.take(8)
+            return when {
+                digits.length >= 3 -> digits.substring(0, 2) + "-***" + digits.takeLast(3)
+                digits.length == 2 -> digits + "-***"
+                else -> digits
+            }
+        }
+
+        suspend fun searchPeople(q: String): List<Person> {
+            val results = mutableMapOf<String, Person>() // uid -> person
+
+            val qTrim = q.trim()
+            val digits = qTrim.filter { it.isDigit() }
+
+            // 1) Display name prefix search
+            try {
+                val snap = db.collection("users")
+                    .whereGreaterThanOrEqualTo("displayName", qTrim)
+                    .whereLessThanOrEqualTo("displayName", qTrim + '\uf8ff')
+                    .limit(20)
+                    .get()
+                    .await()
+
+                snap.documents.forEach { d ->
+                    val uid = d.id
+                    if (uid == currentUserId) return@forEach
+                    val name = d.getString("displayName") ?: return@forEach
+                    val phone = d.getString("phoneNumber")
+                    results[uid] = Person(uid, name, phone)
+                }
+            } catch (e: Exception) {
+                Log.e("HomeScreen", "name search failed", e)
+            }
+
+            // 2) Phone prefix search on users.phoneNumber (string range)
+            if (digits.length >= 2) {
+                try {
+                    val snap = db.collection("users")
+                        .whereGreaterThanOrEqualTo("phoneNumber", digits)
+                        .whereLessThanOrEqualTo("phoneNumber", digits + '\uf8ff')
+                        .limit(20)
+                        .get()
+                        .await()
+
+                    snap.documents.forEach { d ->
+                        val uid = d.id
+                        if (uid == currentUserId) return@forEach
+                        val name = d.getString("displayName") ?: "Unknown"
+                        val phone = d.getString("phoneNumber")
+                        // prefer an existing entry but update phone if missing
+                        results[uid] = results[uid] ?: Person(uid, name, phone)
+                    }
+                } catch (e: Exception) {
+                    Log.e("HomeScreen", "phone prefix search failed", e)
+                }
+            }
+
+            // 3) Exact phone lookup via /phones/{digits} → uid
+            if (digits.length == 8) {
+                try {
+                    val pdoc = db.collection("phones").document(digits).get().await()
+                    val uid = pdoc.getString("uid")
+                    if (!uid.isNullOrBlank() && uid != currentUserId) {
+                        // fetch user doc to get displayName (and phone)
+                        val udoc = db.collection("users").document(uid).get().await()
+                        if (udoc.exists()) {
+                            val name = udoc.getString("displayName") ?: "Unknown"
+                            val phone = udoc.getString("phoneNumber")
+                            results[uid] = Person(uid, name, phone ?: digits)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("HomeScreen", "exact phone map failed", e)
+                }
+            }
+
+            // Return as a list, sorted by name
+            return results.values.sortedBy { it.name.lowercase() }
+        }
+
         ModalBottomSheet(onDismissRequest = { showNewChatSheet = false }) {
             var query by remember { mutableStateOf("") }
+            var people by remember { mutableStateOf<List<Person>>(emptyList()) }
+            val cs = rememberCoroutineScope()
+
             Column(Modifier.padding(16.dp)) {
                 Text("Start new chat", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(8.dp))
+
                 OutlinedTextField(
                     value = query,
                     onValueChange = { q ->
                         query = q
                         if (q.isBlank()) {
-                            searchResults = emptyList()
+                            people = emptyList()
                         } else {
-                            // prefix search on displayName
-                            db.collection("users")
-                                .whereGreaterThanOrEqualTo("displayName", q)
-                                .whereLessThanOrEqualTo("displayName", q + '\uf8ff')
-                                .limit(20)
-                                .get()
-                                .addOnSuccessListener { snap ->
-                                    searchResults = snap.documents.mapNotNull { d ->
-                                        val uid = d.id
-                                        val name = d.getString("displayName")
-                                        if (!name.isNullOrBlank() && uid != currentUserId) uid to name else null
-                                    }
-                                }
-                                .addOnFailureListener {
-                                    Log.e("HomeScreen", "search failed", it)
-                                    searchResults = emptyList()
-                                }
+                            cs.launch(Dispatchers.IO) {
+                                val res = searchPeople(q)
+                                withContext(Dispatchers.Main) { people = res }
+                            }
                         }
                     },
-                    placeholder = { Text("Search people by display name") },
+                    placeholder = { Text("Search by display name or phone (03-123456 or 03123456)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
+
                 Spacer(Modifier.height(12.dp))
 
                 LazyColumn {
-                    items(searchResults) { (uid, name) ->
+                    items(people) { person ->
                         ListItem(
-                            headlineContent = { Text(name) },
-                            supportingContent = { Text(uid) },
+                            headlineContent = { Text(person.name) },
+                            // ✅ NO UID SHOWN; show masked phone if available
+                            supportingContent = {
+                                maskPhone(person.phoneDigits)?.let { Text(it) }
+                            },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    // create-or-get private chat (with fallback & backfill)
-                                    createOrGetPrivateChat(db, currentUserId, uid) { chatId ->
+                                    // Use UID internally but don't display it
+                                    createOrGetPrivateChat(db, currentUserId, person.uid) { chatId ->
                                         if (chatId != null) {
                                             val intent = Intent(context, ChatActivity::class.java)
                                                 .putExtra("chatId", chatId)
                                             context.startActivity(intent)
                                             showNewChatSheet = false
                                         } else {
-                                            Log.e("HomeScreen", "Failed to open/create chat with $uid")
+                                            Log.e("HomeScreen", "Failed to open/create chat with ${person.uid}")
                                         }
                                     }
                                 }
@@ -492,10 +572,12 @@ fun HomeScreen(onLogout: () -> Unit) {
                         Divider()
                     }
                 }
+
                 Spacer(Modifier.height(24.dp))
             }
         }
     }
+
 }
 
 /* ============================================================

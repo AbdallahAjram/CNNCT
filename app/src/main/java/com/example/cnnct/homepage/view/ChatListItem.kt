@@ -1,7 +1,6 @@
 package com.example.cnnct.homepage.view
 
 import android.util.Log
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -12,11 +11,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.example.cnnct.R
+import com.example.cnnct.common.view.UserAvatar
 import com.example.cnnct.homepage.model.ChatSummary
 import java.text.SimpleDateFormat
 import java.util.*
@@ -29,10 +26,12 @@ fun ChatListItem(
     currentUserId: String,
     userMap: Map<String, String>,
     onClick: () -> Unit,
-    // NEW: presence inputs (same idea as ChatScreen)
+    // Presence inputs (unchanged)
     onlineMap: Map<String, Long?> = emptyMap(),   // uid -> lastOnlineAt (ms)
     blockedUserIds: Set<String> = emptySet(),     // future use
-    presenceWindowMs: Long = 2 * 60 * 1000L       // 2 minutes
+    presenceWindowMs: Long = 2 * 60 * 1000L,     // 2 minutes
+    // NEW: optional photo URL for the row avatar (peer for private, group photo for group)
+    photoUrl: String? = null
 ) {
     // -------- Resolve name ----------
     val chatName = when (chatSummary.type) {
@@ -53,7 +52,7 @@ fun ChatListItem(
     }
     Log.d("ChatListItem", "Resolved chatName → $chatName")
 
-    // -------- Presence (copy of ChatScreen logic) ----------
+    // -------- Presence (same as your ChatScreen logic) ----------
     fun presenceFor(uid: String?): Presence {
         if (uid == null) return Presence.Offline
         if (blockedUserIds.contains(uid)) return Presence.Blocked
@@ -63,7 +62,7 @@ fun ChatListItem(
     }
 
     // For PRIVATE chats: presence of the *other* user.
-    // For GROUP chats: we keep a single dot (offline) like header in ChatScreen.
+    // For GROUP chats: single dot (offline) like header.
     val presence = when (chatSummary.type) {
         "private" -> presenceFor(chatSummary.members.firstOrNull { it != currentUserId })
         else      -> Presence.Offline
@@ -89,18 +88,15 @@ fun ChatListItem(
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // ---------- Avatar with status dot ----------
+            // ---------- Avatar with status dot (dynamic URL + fallback handled inside UserAvatar) ----------
             Box(
                 modifier = Modifier.size(48.dp),
                 contentAlignment = Alignment.BottomEnd
             ) {
-                Image(
-                    painter = painterResource(id = R.drawable.defaultpp),
-                    contentDescription = "Avatar",
-                    modifier = Modifier
-                        .matchParentSize()
-                        .clip(CircleShape),
-                    contentScale = ContentScale.Crop
+                UserAvatar(
+                    photoUrl = photoUrl,   // ← pass peer/group url when you have it; null uses default drawable
+                    size = 48.dp,
+                    contentDescription = "Avatar"
                 )
                 // Dot (bottom-right) with a small white ring
                 Box(
@@ -170,8 +166,6 @@ fun ChatListItem(
 
                     // Show ticks only if YOU sent the last message
                     if (chatSummary.lastMessageSenderId == currentUserId && chatSummary.lastMessageText.isNotBlank()) {
-                        // fallback: if status is null but legacy isRead true => "read",
-                        // otherwise default to "delivered" so at least ✓✓ gray shows
                         val effectiveStatus = chatSummary.lastMessageStatus
                             ?: if (chatSummary.lastMessageIsRead) "read" else "delivered"
 

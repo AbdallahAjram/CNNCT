@@ -1,7 +1,6 @@
 package com.cnnct.chat.mvc.view
 
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -46,7 +45,12 @@ fun ChatScreen(
     chatType: String = "private",
     title: String = "Chat",
     subtitle: String? = null,
+
+    // mapping helpers
     nameOf: (String) -> String = { it },
+    userPhotoOf: (String) -> String? = { null }, // ← pass uid -> photoUrl
+    groupPhotoUrl: String? = null,               // ← optional header image for groups
+
     otherUserId: String? = null,
     otherLastReadId: String? = null,
     otherLastOpenedAtMs: Long? = null,
@@ -61,7 +65,7 @@ fun ChatScreen(
     val messagesRaw by controller.messages.collectAsState()
     val listState = rememberLazyListState()
 
-    // filter "delete for me"
+    // remove hidden-for-me
     val messages = remember(messagesRaw, currentUserId) {
         messagesRaw.filter { m -> m.hiddenFor?.contains(currentUserId) != true }
     }
@@ -75,7 +79,6 @@ fun ChatScreen(
     // edit
     var editTargetId by remember { mutableStateOf<String?>(null) }
     var editText by remember { mutableStateOf("") }
-    val openEdit = { id: String, text: String -> editTargetId = id; editText = text }
 
     // delete dialog
     var showDeleteDialog by remember { mutableStateOf(false) }
@@ -87,7 +90,7 @@ fun ChatScreen(
     data class ViewMedia(val url: String, val name: String?)
     var viewer by remember { mutableStateOf<ViewMedia?>(null) }
 
-    /* ===== pickers (MULTIPLE ONLY) ===== */
+    /* ===== pickers ===== */
     val pickMedia = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia()
     ) { uris ->
@@ -120,7 +123,7 @@ fun ChatScreen(
         )
     }
 
-    // helpers from memberMeta
+    // member meta helpers
     fun metaOf(uid: String): Map<*, *>? = (memberMeta as? Map<*, *>)?.get(uid) as? Map<*, *>
     fun openedAtMs(uid: String): Long? =
         (metaOf(uid)?.get("lastOpenedAt") as? com.google.firebase.Timestamp)?.toDate()?.time
@@ -130,7 +133,7 @@ fun ChatScreen(
         return m.createdAt?.toDate()?.time ?: m.createdAtClient?.toDate()?.time
     }
 
-    // presence (enum + UI are defined in your ChatComponents file)
+    // presence
     fun presenceFor(uid: String?): Presence {
         if (uid == null) return Presence.Offline
         if (blockedUserIds.contains(uid)) return Presence.Blocked
@@ -173,9 +176,14 @@ fun ChatScreen(
         }
     }
 
+    // header presence + photo
     val headerPresence = if (chatType == "private") presenceFor(otherUserId) else Presence.Offline
+    val headerPhotoUrl = when {
+        chatType == "private" -> userPhotoOf(otherUserId ?: "")
+        else -> groupPhotoUrl
+    }
 
-    // delete eligibility (reuses your shared helper in this package)
+    // delete eligibility
     val eligibility by remember(selected, messages, currentUserId) {
         derivedStateOf { computeDeleteEligibility(messages, selected, currentUserId) }
     }
@@ -195,7 +203,8 @@ fun ChatScreen(
                     onClose = { clearSelection() },
                     onEdit = {
                         val m = messages.firstOrNull { it.id == selected.first() } ?: return@SelectionTopBar
-                        openEdit(m.id, m.text.orEmpty())
+                        editTargetId = m.id
+                        editText = m.text.orElse("")
                     },
                     onDeleteClick = { showDeleteDialog = true }
                 )
@@ -204,6 +213,7 @@ fun ChatScreen(
                     title = title,
                     subtitle = subtitle,
                     presence = headerPresence,
+                    photoUrl = headerPhotoUrl,
                     onBack = onBack,
                     onCallClick = onCallClick
                 )
@@ -238,9 +248,10 @@ fun ChatScreen(
             ) {
                 itemsIndexed(groups) { gIndex, g ->
                     val firstMsg = messages[g.start]
-                    val isMeBlock = g.senderId == currentUserId
+                    val isMeBlock = firstMsg.senderId == currentUserId
                     val isGroupChat = chatType == "group"
 
+                    // Day divider between blocks
                     val prevMsg = messages.getOrNull(g.start - 1)
                     val prevMs = prevMsg?.sentAtMs()
                     val firstMs = firstMsg.sentAtMs()
@@ -254,165 +265,196 @@ fun ChatScreen(
                     val blockVerticalPad = 4.dp
                     val interBlockSpace = 12.dp
 
-                    Row(
+                    // Render each message in the group…
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = blockHorizontalPad, vertical = blockVerticalPad),
-                        horizontalArrangement = if (isMeBlock) Arrangement.End else Arrangement.Start,
-                        verticalAlignment = Alignment.Top
+                            .padding(horizontal = blockHorizontalPad, vertical = blockVerticalPad)
                     ) {
-                        if (!isMeBlock && isGroupChat) {
-                            AvatarWithStatus(size = 30.dp, presence = presenceFor(firstMsg.senderId))
-                            Spacer(Modifier.width(8.dp))
-                        }
+                        for (i in g.start..g.end) {
+                            val m = messages[i]
+                            val me = (m.senderId == currentUserId)
+                            val selectedThis = selected.contains(m.id)
 
-                        Column(
-                            horizontalAlignment = if (isMeBlock) Alignment.End else Alignment.Start,
-                            modifier = Modifier.widthIn(max = maxBubbleWidth)
-                        ) {
-                            if (!isMeBlock && isGroupChat) {
-                                Text(
-                                    text = nameOf(firstMsg.senderId),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = Color(0xFF6B7280),
-                                    modifier = Modifier.padding(bottom = 2.dp, start = 4.dp, end = 4.dp)
-                                )
-                            }
-
-                            for (i in g.start..g.end) {
-                                val m = messages[i]
-                                val idxInBlock = i - g.start
-                                val lastIdx = g.end - g.start
-                                val selectedThis = selected.contains(m.id)
-
-                                val bubbleColor = when {
-                                    m.deleted -> MaterialTheme.colorScheme.surfaceVariant
-                                    isMeBlock -> Color(0xFF7A3EB1)
-                                    else -> Color(0xFF2D7FF9)
-                                }
-                                val shape = bubbleShapeInBlock(isMe = isMeBlock, idx = idxInBlock, lastIdx = lastIdx)
-
-                                Box(
-                                    modifier = Modifier.combinedClickable(
-                                        onClick = {
-                                            if (inSelection) {
-                                                toggleSelect(m.id)
-                                            } else if (!m.deleted && m.type != MessageType.text) {
-                                                m.mediaUrl?.let { url -> viewer = ViewMedia(url, m.text) }
-                                            }
-                                        },
-                                        onLongClick = { toggleSelect(m.id) }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth(),
+                                horizontalArrangement = if (me) Arrangement.End else Arrangement.Start,
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                // ⬅️ Show avatar per message for group chats (for other users)
+                                if (!me && isGroupChat) {
+                                    AvatarWithStatus(
+                                        size = 30.dp,
+                                        presence = presenceFor(m.senderId),
+                                        photoUrl = userPhotoOf(m.senderId) // ← per-message photo
                                     )
+                                    Spacer(Modifier.width(8.dp))
+                                }
+
+                                // Sender label on first message of a (sender) run in group chats
+                                val showNameLabel =
+                                    isGroupChat && !me &&
+                                            (i == g.start || messages[i - 1].senderId != m.senderId)
+
+                                Column(
+                                    horizontalAlignment = if (me) Alignment.End else Alignment.Start,
+                                    modifier = Modifier.widthIn(max = maxBubbleWidth)
                                 ) {
-                                    Surface(
-                                        color = if (selectedThis) bubbleColor.copy(alpha = 0.78f) else bubbleColor,
-                                        shape = shape,
-                                        tonalElevation = 0.dp,
-                                        shadowElevation = 0.dp,
-                                        modifier = Modifier.then(
-                                            if (selectedThis) Modifier.border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.9f), shape)
-                                            else Modifier
+                                    if (showNameLabel) {
+                                        Text(
+                                            text = nameOf(m.senderId),
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = Color(0xFF6B7280),
+                                            modifier = Modifier.padding(bottom = 2.dp, start = 4.dp, end = 4.dp)
+                                        )
+                                    }
+
+                                    val bubbleColor = when {
+                                        m.deleted -> MaterialTheme.colorScheme.surfaceVariant
+                                        me -> Color(0xFF7A3EB1)
+                                        else -> Color(0xFF2D7FF9)
+                                    }
+                                    val shape = bubbleShapeInBlock(
+                                        isMe = me,
+                                        idx = 0,              // per-message bubble (no inner rounding needed)
+                                        lastIdx = 0
+                                    )
+
+                                    Box(
+                                        modifier = Modifier.combinedClickable(
+                                            onClick = {
+                                                if (inSelection) {
+                                                    toggleSelect(m.id)
+                                                } else if (!m.deleted && m.type != MessageType.text) {
+                                                    m.mediaUrl?.let { url ->
+                                                        viewer = ViewMedia(url, m.text)
+                                                    }
+                                                }
+                                            },
+                                            onLongClick = { toggleSelect(m.id) }
                                         )
                                     ) {
-                                        Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
-                                            // CONTENT
-                                            if (m.deleted) {
-                                                Text(
-                                                    text = if (isMeBlock) "You deleted this message." else "This message was deleted.",
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    style = MaterialTheme.typography.bodyMedium
-                                                )
-                                            } else if (m.type == MessageType.text) {
-                                                Text(
-                                                    text = m.text.orEmpty(),
-                                                    color = Color.White,
-                                                    style = MaterialTheme.typography.bodyMedium
-                                                )
-                                            } else {
-                                                // Attachment -> inline; pass inSelection so inner click is disabled while selecting
-                                                AttachmentContent(
-                                                    message = m,
-                                                    inSelection = inSelection,
-                                                    onOpen = {
-                                                        m.mediaUrl?.let { url ->
-                                                            viewer = ViewMedia(url, m.text)
+                                        Surface(
+                                            color = if (selectedThis) bubbleColor.copy(alpha = 0.78f) else bubbleColor,
+                                            shape = shape,
+                                            tonalElevation = 0.dp,
+                                            shadowElevation = 0.dp,
+                                            modifier = Modifier.then(
+                                                if (selectedThis) Modifier.border(
+                                                    2.dp,
+                                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
+                                                    shape
+                                                ) else Modifier
+                                            )
+                                        ) {
+                                            Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                                                if (m.deleted) {
+                                                    Text(
+                                                        text = if (me) "You deleted this message." else "This message was deleted.",
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        style = MaterialTheme.typography.bodyMedium
+                                                    )
+                                                } else if (m.type == MessageType.text) {
+                                                    Text(
+                                                        text = m.text.orElse(""),
+                                                        color = Color.White,
+                                                        style = MaterialTheme.typography.bodyMedium
+                                                    )
+                                                } else {
+                                                    AttachmentContent(
+                                                        message = m,
+                                                        inSelection = inSelection,
+                                                        onOpen = {
+                                                            m.mediaUrl?.let { url ->
+                                                                viewer = ViewMedia(url, m.text)
+                                                            }
                                                         }
+                                                    )
+                                                }
+
+                                                Spacer(Modifier.height(2.dp))
+
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    val displayTs = m.createdAt ?: m.createdAtClient
+                                                    val time = displayTs?.toDate()?.let {
+                                                        android.text.format.DateFormat
+                                                            .format("h:mm a", it).toString()
+                                                    } ?: "…"
+                                                    val timeSuffix =
+                                                        if (m.editedAt != null && !m.deleted) " (edited)" else ""
+
+                                                    Text(
+                                                        time + timeSuffix,
+                                                        color = if (m.deleted)
+                                                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+                                                        else Color.White.copy(alpha = 0.75f),
+                                                        style = MaterialTheme.typography.labelSmall
+                                                    )
+
+                                                    if (me && !m.deleted) {
+                                                        Spacer(Modifier.width(6.dp))
+                                                        val createdMs = m.sentAtMs()
+                                                        val delivered: Boolean
+                                                        val read: Boolean
+
+                                                        if (chatType == "private") {
+                                                            delivered = createdMs != null &&
+                                                                    (otherLastOpenedAtMs != null && otherLastOpenedAtMs >= createdMs)
+                                                            val lastReadCutoff =
+                                                                msgTimeMsById(otherLastReadId, messages)
+                                                            read = createdMs != null && lastReadCutoff != null &&
+                                                                    createdMs <= lastReadCutoff
+                                                        } else if (chatType == "group") {
+                                                            val others = memberIds.filter { it != currentUserId }
+                                                            delivered = createdMs != null && others.all { uid ->
+                                                                val opened = openedAtMs(uid)
+                                                                opened != null && opened >= createdMs
+                                                            }
+                                                            read = createdMs != null && others.all { uid ->
+                                                                val readId = metaOf(uid)?.get("lastReadMessageId") as? String
+                                                                val cutoff = msgTimeMsById(readId, messages)
+                                                                cutoff != null && cutoff >= createdMs
+                                                            }
+                                                        } else {
+                                                            delivered = false
+                                                            read = false
+                                                        }
+
+                                                        Ticks(
+                                                            sent = createdMs != null,
+                                                            delivered = delivered,
+                                                            read = read
+                                                        )
                                                     }
-                                                )
-                                            }
-
-                                            Spacer(Modifier.height(2.dp))
-
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                val displayTs = m.createdAt ?: m.createdAtClient
-                                                val time = displayTs?.toDate()?.let {
-                                                    android.text.format.DateFormat.format("h:mm a", it).toString()
-                                                } ?: "…"
-                                                val timeSuffix = if (m.editedAt != null && !m.deleted) " (edited)" else ""
-
-                                                Text(
-                                                    time + timeSuffix,
-                                                    color = if (m.deleted) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
-                                                    else Color.White.copy(alpha = 0.75f),
-                                                    style = MaterialTheme.typography.labelSmall
-                                                )
-
-                                                if (isMeBlock && !m.deleted) {
-                                                    Spacer(Modifier.width(6.dp))
-                                                    val createdMs = m.sentAtMs()
-                                                    val delivered: Boolean
-                                                    val read: Boolean
-
-                                                    if (chatType == "private") {
-                                                        delivered = createdMs != null &&
-                                                                (otherLastOpenedAtMs != null && otherLastOpenedAtMs >= createdMs)
-                                                        val lastReadCutoff = msgTimeMsById(otherLastReadId, messages)
-                                                        read = createdMs != null && lastReadCutoff != null && createdMs <= lastReadCutoff
-                                                    } else if (chatType == "group") {
-                                                        val others = memberIds.filter { it != currentUserId }
-                                                        delivered = createdMs != null && others.all { uid ->
-                                                            val opened = openedAtMs(uid)
-                                                            opened != null && opened >= createdMs
-                                                        }
-                                                        read = createdMs != null && others.all { uid ->
-                                                            val readId = metaOf(uid)?.get("lastReadMessageId") as? String
-                                                            val cutoff = msgTimeMsById(readId, messages)
-                                                            cutoff != null && cutoff >= createdMs
-                                                        }
-                                                    } else {
-                                                        delivered = false
-                                                        read = false
-                                                    }
-
-                                                    Ticks(sent = createdMs != null, delivered = delivered, read = read)
                                                 }
                                             }
                                         }
-                                    }
 
-                                    // selection badge
-                                    if (selectedThis) {
-                                        Box(
-                                            modifier = Modifier
-                                                .align(Alignment.TopEnd)
-                                                .offset(x = 6.dp, y = (-6).dp)
-                                                .size(20.dp)
-                                                .clip(CircleShape)
-                                                .background(MaterialTheme.colorScheme.primary),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                Icons.Filled.Done,
-                                                contentDescription = "Selected",
-                                                tint = MaterialTheme.colorScheme.onPrimary,
-                                                modifier = Modifier.size(14.dp)
-                                            )
+                                        // selection badge
+                                        if (selectedThis) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .align(Alignment.TopEnd)
+                                                    .offset(x = 6.dp, y = (-6).dp)
+                                                    .size(20.dp)
+                                                    .clip(CircleShape)
+                                                    .background(MaterialTheme.colorScheme.primary),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    Icons.Filled.Done,
+                                                    contentDescription = "Selected",
+                                                    tint = MaterialTheme.colorScheme.onPrimary
+                                                )
+                                            }
                                         }
                                     }
                                 }
-
-                                if (i != g.end) Spacer(Modifier.height(2.dp))
                             }
+
+                            // vertical spacing between messages
+                            if (i != g.end) Spacer(Modifier.height(8.dp))
                         }
                     }
 
@@ -420,7 +462,7 @@ fun ChatScreen(
                 }
             }
 
-            // Edit
+            // Edit dialog
             if (editTargetId != null) {
                 EditMessageDialog(
                     text = editText,
@@ -458,7 +500,7 @@ fun ChatScreen(
                 )
             }
 
-            // Attach chooser dialog (use your existing AttachChooserDialog)
+            // Attach chooser dialog
             if (showAttachDialog) {
                 AttachChooserDialog(
                     onPickMedia = {
@@ -488,3 +530,7 @@ fun ChatScreen(
         }
     }
 }
+
+/* ---------- tiny helpers ---------- */
+
+private fun String?.orElse(fallback: String) = if (this.isNullOrEmpty()) fallback else this

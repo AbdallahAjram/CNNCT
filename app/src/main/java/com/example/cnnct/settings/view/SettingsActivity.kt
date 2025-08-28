@@ -1,6 +1,7 @@
 // SettingsActivity.kt
 package com.example.cnnct.settings.view
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -43,7 +44,10 @@ class SettingsActivity : ComponentActivity() {
                     onNavigate = { option ->
                         // Map the tapped row to a route/tag; wire this to your NavHost or Intents
                         when (controller.handleNavigation(option)) {
-                            "account" -> {/* TODO: navigate to Account */}
+                            "account" -> {
+                                val intent = Intent(this, AccountActivity::class.java)
+                                startActivity(intent)
+                            }
                             "privacy" -> {/* TODO: navigate to Privacy */}
                             "themes" -> {/* TODO: navigate to Themes */}
                             "notifications" -> {/* TODO: navigate to Notifications */}

@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.cnnct.common.view.UserAvatar
 import com.example.cnnct.homepage.controller.HomePController
 import com.example.cnnct.homepage.controller.PreloadedChatsCache
 import com.example.cnnct.homepage.model.ChatSummary
@@ -210,7 +211,10 @@ fun GroupScreen() {
                             onClick = {
                                 val id = chat.id // ensure ChatSummary has `id: String`
                                 if (id.isNotBlank()) {
-                                    val intent = Intent(context, com.example.cnnct.chat.view.ChatActivity::class.java)
+                                    val intent = Intent(
+                                        context,
+                                        com.example.cnnct.chat.view.ChatActivity::class.java
+                                    )
                                     intent.putExtra("chatId", id) // ChatActivity only needs this
                                     context.startActivity(intent)
                                 } else {
@@ -225,6 +229,7 @@ fun GroupScreen() {
     }
 }
 
+/* ---------- Row item with avatar ---------- */
 
 @Composable
 private fun GroupListItem(
@@ -235,6 +240,11 @@ private fun GroupListItem(
 ) {
     val chatName = chatSummary.groupName ?: "Group"
 
+    // If you later add a group photo URL to ChatSummary, plug it here:
+    val groupPhotoUrl: String? = null
+    // e.g., if you add `val groupPhotoUrl: String?` to ChatSummary, do:
+    // val groupPhotoUrl = chatSummary.groupPhotoUrl
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -243,68 +253,89 @@ private fun GroupListItem(
         shape = MaterialTheme.shapes.medium,
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 🔹 Group avatar (dynamic when URL exists; fallback to drawable via UserAvatar)
+            UserAvatar(
+                photoUrl = groupPhotoUrl,
+                // If you have a dedicated group default drawable, pass it via fallbackRes:
+                // fallbackRes = R.drawable.default_group,
+                size = 44.dp,
+                contentDescription = "Group avatar"
+            )
 
-            // Title + time
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = chatName,
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f)
-                )
+            Spacer(Modifier.width(12.dp))
 
-                chatSummary.lastMessageTimestamp?.let { ts ->
+            Column(modifier = Modifier.weight(1f)) {
+                // Title + time
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
-                        text = formatTimestamp(ts),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = chatName,
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
-                }
-            }
 
-            Spacer(Modifier.height(4.dp))
-
-            // Last line + ticks
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                val rawText = chatSummary.lastMessageText.takeIf { it.isNotBlank() } ?: "No messages yet"
-                val senderLabel: String? = when {
-                    chatSummary.lastMessageSenderId.isNullOrBlank() -> null
-                    chatSummary.lastMessageSenderId == currentUserId -> "You"
-                    else -> userMap[chatSummary.lastMessageSenderId] ?: "Someone"
-                }
-                val finalText = if (senderLabel.isNullOrBlank()) rawText else "$senderLabel: $rawText"
-
-                Text(
-                    text = finalText,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f)
-                )
-
-                if (chatSummary.lastMessageSenderId == currentUserId && chatSummary.lastMessageText.isNotBlank()) {
-                    val effectiveStatus = chatSummary.lastMessageStatus
-                        ?: if (chatSummary.lastMessageIsRead) "read" else "delivered"
-                    val (ticks, color) = when (effectiveStatus) {
-                        "read" -> "✓✓" to MaterialTheme.colorScheme.primary
-                        "delivered" -> "✓✓" to MaterialTheme.colorScheme.onSurfaceVariant
-                        "sent" -> "✓" to MaterialTheme.colorScheme.onSurfaceVariant
-                        else -> null to MaterialTheme.colorScheme.onSurfaceVariant
-                    }
-                    if (ticks != null) {
+                    chatSummary.lastMessageTimestamp?.let { ts ->
                         Text(
-                            text = ticks,
+                            text = formatTimestamp(ts),
                             style = MaterialTheme.typography.bodySmall,
-                            color = color,
-                            modifier = Modifier.padding(start = 8.dp)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                }
+
+                Spacer(Modifier.height(4.dp))
+
+                // Last line + ticks
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val rawText = chatSummary.lastMessageText.takeIf { it.isNotBlank() } ?: "No messages yet"
+                    val senderLabel: String? = when {
+                        chatSummary.lastMessageSenderId.isNullOrBlank() -> null
+                        chatSummary.lastMessageSenderId == currentUserId -> "You"
+                        else -> userMap[chatSummary.lastMessageSenderId] ?: "Someone"
+                    }
+                    val finalText = if (senderLabel.isNullOrBlank()) rawText else "$senderLabel: $rawText"
+
+                    Text(
+                        text = finalText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    if (chatSummary.lastMessageSenderId == currentUserId && chatSummary.lastMessageText.isNotBlank()) {
+                        val effectiveStatus = chatSummary.lastMessageStatus
+                            ?: if (chatSummary.lastMessageIsRead) "read" else "delivered"
+                        val (ticks, color) = when (effectiveStatus) {
+                            "read" -> "✓✓" to MaterialTheme.colorScheme.primary
+                            "delivered" -> "✓✓" to MaterialTheme.colorScheme.onSurfaceVariant
+                            "sent" -> "✓" to MaterialTheme.colorScheme.onSurfaceVariant
+                            else -> null to MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                        if (ticks != null) {
+                            Text(
+                                text = ticks,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = color,
+                                modifier = Modifier.padding(start = 8.dp)
+                            )
+                        }
                     }
                 }
             }

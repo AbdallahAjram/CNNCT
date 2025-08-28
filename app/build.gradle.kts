@@ -46,6 +46,7 @@ android {
 }
 
 dependencies {
+    implementation("com.vanniktech:android-image-cropper:4.6.0")
     implementation(platform("androidx.compose:compose-bom:2025.06.00"))
     implementation("androidx.activity:activity-compose")
     implementation("androidx.compose.ui:ui")

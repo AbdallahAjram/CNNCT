@@ -44,6 +44,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.rememberCoroutineScope
+import com.example.cnnct.homepage.controller.HomePController
+
 
 class HomeActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -125,6 +127,7 @@ fun HomeScreen(onLogout: () -> Unit) {
 
     var chatSummaries by remember { mutableStateOf<List<ChatSummary>>(emptyList()) }
     var userMap by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var userPhotoMap by remember { mutableStateOf<Map<String, String?>>(emptyMap()) }
     var searchQuery by remember { mutableStateOf("") }
 
     // Presence state
@@ -132,7 +135,6 @@ fun HomeScreen(onLogout: () -> Unit) {
     var presenceRegs by remember { mutableStateOf<List<ListenerRegistration>>(emptyList()) }
 
     var showNewChatSheet by remember { mutableStateOf(false) }
-    var searchResults by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
 
     val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -140,11 +142,7 @@ fun HomeScreen(onLogout: () -> Unit) {
     var menuExpanded by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    // ==== Real-time chats (HYBRID: per-user previews + global fallback) ====
-    // 1) Listen to /userChats/{me}/chats for per-user last message (respects delete-for-me)
-    // 2) Always fetch my membership from /chats, and merge:
-    //    - If a preview exists for a chat, use it
-    //    - Otherwise fall back to the chat doc’s lastMessage* (until I open the chat once)
+    // ==== Real-time chats (hybrid: previews + chat metadata) ====
     DisposableEffect(currentUserId) {
         if (currentUserId.isBlank()) return@DisposableEffect onDispose {}
         val reg: ListenerRegistration =
@@ -164,7 +162,6 @@ fun HomeScreen(onLogout: () -> Unit) {
 
                     scope.launch {
                         try {
-                            // Fetch ALL chats I’m a member of
                             val chatsSnap = withContext(Dispatchers.IO) {
                                 db.collection("chats")
                                     .whereArrayContains("members", currentUserId)
@@ -214,7 +211,6 @@ fun HomeScreen(onLogout: () -> Unit) {
                                 }
                             }
 
-                            // Sort by last message time (desc), fallback to updatedAt
                             val sorted = merged.sortedByDescending {
                                 it.lastMessageTimestamp?.toDate()?.time
                                     ?: it.updatedAt?.toDate()?.time
@@ -230,29 +226,35 @@ fun HomeScreen(onLogout: () -> Unit) {
         onDispose { reg.remove() }
     }
 
-    // Build userMap + presence listeners when chats change
+    // Build user names + photos + presence listeners when chats change
     LaunchedEffect(chatSummaries) {
         val targets = chatSummaries
             .flatMap { it.members + (it.lastMessageSenderId ?: "") }
             .filter { it.isNotBlank() && it != currentUserId }
             .distinct()
 
-        // Names (one-shot)
+        // Names & Photos (one-shot)
         val nameMap = mutableMapOf<String, String>()
+        val photoMap = mutableMapOf<String, String?>()
+
         for (chunk in targets.chunked(10)) {
             try {
                 val snap = db.collection("users")
                     .whereIn(FieldPath.documentId(), chunk)
                     .get()
                     .await()
+
                 snap.documents.forEach { doc ->
-                    nameMap[doc.id] = doc.getString("displayName") ?: "Unknown"
+                    val uid = doc.id
+                    nameMap[uid] = doc.getString("displayName") ?: "Unknown"
+                    photoMap[uid] = doc.getString("photoUrl") // nullable
                 }
             } catch (e: Exception) {
-                Log.e("HomeScreen", "userMap chunk failed", e)
+                Log.e("HomeScreen", "userMap/photoMap chunk failed", e)
             }
         }
         userMap = nameMap
+        userPhotoMap = photoMap
 
         // Presence (real-time)
         presenceRegs.forEach { it.remove() }
@@ -278,7 +280,7 @@ fun HomeScreen(onLogout: () -> Unit) {
         presenceRegs = regs
     }
 
-    // Recipient-side delivery polling (foreground)
+    // Delivery polling
     val pollSeconds = remember { 25 }
     LaunchedEffect(pollSeconds, currentUserId) {
         if (currentUserId.isBlank()) return@LaunchedEffect
@@ -410,6 +412,19 @@ fun HomeScreen(onLogout: () -> Unit) {
             } else {
                 LazyColumn {
                     items(filtered, key = { it.id }) { chat ->
+                        val photoUrlForRow: String? = when (chat.type) {
+                            "private" -> {
+                                val other = chat.members.firstOrNull { it != currentUserId }
+                                userPhotoMap[other]   // null ⇒ UserAvatar falls back to drawable
+                            }
+                            "group" -> {
+                                // If you later add `groupPhotoUrl` to ChatSummary, use it:
+                                // chat.groupPhotoUrl
+                                null
+                            }
+                            else -> null
+                        }
+
                         ChatListItem(
                             chatSummary = chat,
                             currentUserId = currentUserId,
@@ -419,8 +434,9 @@ fun HomeScreen(onLogout: () -> Unit) {
                                     .putExtra("chatId", chat.id)
                                 context.startActivity(intent)
                             },
-                            onlineMap = onlineMap,            // presence map
-                            blockedUserIds = emptySet()       // wire when you add block logic
+                            onlineMap = onlineMap,
+                            blockedUserIds = emptySet(),
+                            photoUrl = photoUrlForRow
                         )
                     }
                 }
@@ -428,7 +444,6 @@ fun HomeScreen(onLogout: () -> Unit) {
         }
     }
 
-    // ========= NEW CHAT BOTTOM SHEET (FAB) =========
     // ========= NEW CHAT BOTTOM SHEET (FAB) =========
     if (showNewChatSheet) {
         data class Person(val uid: String, val name: String, val phoneDigits: String?)
@@ -484,7 +499,6 @@ fun HomeScreen(onLogout: () -> Unit) {
                         if (uid == currentUserId) return@forEach
                         val name = d.getString("displayName") ?: "Unknown"
                         val phone = d.getString("phoneNumber")
-                        // prefer an existing entry but update phone if missing
                         results[uid] = results[uid] ?: Person(uid, name, phone)
                     }
                 } catch (e: Exception) {
@@ -498,7 +512,6 @@ fun HomeScreen(onLogout: () -> Unit) {
                     val pdoc = db.collection("phones").document(digits).get().await()
                     val uid = pdoc.getString("uid")
                     if (!uid.isNullOrBlank() && uid != currentUserId) {
-                        // fetch user doc to get displayName (and phone)
                         val udoc = db.collection("users").document(uid).get().await()
                         if (udoc.exists()) {
                             val name = udoc.getString("displayName") ?: "Unknown"
@@ -511,7 +524,6 @@ fun HomeScreen(onLogout: () -> Unit) {
                 }
             }
 
-            // Return as a list, sorted by name
             return results.values.sortedBy { it.name.lowercase() }
         }
 
@@ -548,15 +560,13 @@ fun HomeScreen(onLogout: () -> Unit) {
                     items(people) { person ->
                         ListItem(
                             headlineContent = { Text(person.name) },
-                            // ✅ NO UID SHOWN; show masked phone if available
                             supportingContent = {
                                 maskPhone(person.phoneDigits)?.let { Text(it) }
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    // Use UID internally but don't display it
-                                    createOrGetPrivateChat(db, currentUserId, person.uid) { chatId ->
+                                    HomePController.createOrGetPrivateChat(person.uid) { chatId ->
                                         if (chatId != null) {
                                             val intent = Intent(context, ChatActivity::class.java)
                                                 .putExtra("chatId", chatId)
@@ -577,84 +587,4 @@ fun HomeScreen(onLogout: () -> Unit) {
             }
         }
     }
-
-}
-
-/* ============================================================
-   Private chat open/create with legacy fallback & backfill
-   ============================================================ */
-private fun createOrGetPrivateChat(
-    db: FirebaseFirestore,
-    me: String,
-    other: String,
-    onResult: (String?) -> Unit
-) {
-    if (me.isBlank() || other.isBlank() || me == other) {
-        onResult(null); return
-    }
-    val pairKey = listOf(me, other).sorted().joinToString("#")
-
-    // 1) Fast path: by pairKey (and membership, to satisfy rules)
-    db.collection("chats")
-        .whereArrayContains("members", me)
-        .whereEqualTo("type", "private")
-        .whereEqualTo("pairKey", pairKey)
-        .limit(1)
-        .get()
-        .addOnSuccessListener { snap ->
-            if (!snap.isEmpty) {
-                onResult(snap.documents.first().id)
-                return@addOnSuccessListener
-            }
-
-            // 2) Fallback: look at my private chats, filter for the peer (legacy chats without pairKey)
-            db.collection("chats")
-                .whereArrayContains("members", me)
-                .whereEqualTo("type", "private")
-                .limit(50) // tune if needed
-                .get()
-                .addOnSuccessListener { s2 ->
-                    val existing = s2.documents.firstOrNull { d ->
-                        (d.get("members") as? List<*>)?.contains(other) == true
-                    }
-                    if (existing != null) {
-                        // Backfill pairKey for future fast lookups
-                        if (!existing.contains("pairKey")) {
-                            existing.reference.update("pairKey", pairKey)
-                                .addOnFailureListener { e ->
-                                    Log.w("HomeScreen", "pairKey backfill failed for ${existing.id}", e)
-                                }
-                        }
-                        onResult(existing.id)
-                    } else {
-                        // 3) Create new
-                        val data = hashMapOf(
-                            "type" to "private",
-                            "members" to listOf(me, other),
-                            "pairKey" to pairKey,
-                            "lastMessageText" to "",
-                            "lastMessageTimestamp" to null,
-                            "lastMessageSenderId" to null,
-                            "lastMessageIsRead" to false,
-                            "createdAt" to com.google.firebase.Timestamp.now(),
-                            "updatedAt" to com.google.firebase.Timestamp.now()
-                        )
-                        db.collection("chats")
-                            .add(data)
-                            .addOnSuccessListener { ref -> onResult(ref.id) }
-                            .addOnFailureListener { e ->
-                                Log.e("HomeScreen", "create chat failed", e)
-                                onResult(null)
-                            }
-                    }
-                }
-                .addOnFailureListener {
-                    Log.e("HomeScreen", "fallback query failed", it)
-                    onResult(null)
-                }
-        }
-        .addOnFailureListener {
-            Log.e("HomeScreen", "pairKey query failed", it)
-            onResult(null)
-        }
 }

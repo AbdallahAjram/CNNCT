@@ -1,6 +1,5 @@
 package com.cnnct.chat.mvc.view
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -21,15 +20,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
-import com.example.cnnct.R
+import com.example.cnnct.common.view.UserAvatar
 
 /* ===== Presence ===== */
 enum class Presence { Online, Offline, Blocked }
@@ -69,6 +65,7 @@ fun TopBar(
     title: String,
     subtitle: String?,
     presence: Presence,
+    photoUrl: String? = null,
     onBack: () -> Unit,
     onCallClick: () -> Unit
 ) {
@@ -80,7 +77,7 @@ fun TopBar(
         },
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                AvatarWithStatus(size = 36.dp, presence = presence)
+                AvatarWithStatus(size = 36.dp, presence = presence, photoUrl = photoUrl)
                 Spacer(Modifier.width(8.dp))
                 Column {
                     Text(text = title, style = MaterialTheme.typography.titleMedium)
@@ -107,29 +104,31 @@ fun TopBar(
 @Composable
 fun AvatarWithStatus(
     size: Dp,
-    presence: Presence
+    presence: Presence,
+    photoUrl: String? = null
 ) {
     val dotColor = when (presence) {
-        Presence.Blocked -> Color(0xFFFF3B30)
-        Presence.Online  -> Color(0xFF34C759)
-        Presence.Offline -> Color(0xFF9CA3AF)
+        Presence.Blocked -> Color(0xFFFF3B30)  // red
+        Presence.Online  -> Color(0xFF34C759)  // green
+        Presence.Offline -> Color(0xFF9CA3AF)  // gray
     }
+
     Box(
         modifier = Modifier.size(size),
         contentAlignment = Alignment.BottomEnd
     ) {
-        Image(
-            painter = painterResource(id = R.drawable.defaultpp),
-            contentDescription = "Avatar",
-            modifier = Modifier
-                .fillMaxSize()
-                .clip(CircleShape)
+        UserAvatar(
+            photoUrl = photoUrl,
+            size = size,
+            contentDescription = "Avatar"
         )
+
+        // Presence dot (with a tiny ring)
         Box(
             modifier = Modifier
                 .size((size.value * 0.38f).dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surface)
+                .background(MaterialTheme.colorScheme.surface) // ring
                 .padding(2.dp),
             contentAlignment = Alignment.Center
         ) {
@@ -188,8 +187,8 @@ fun MessageInput(
     onSend: (String) -> Unit,
     onAttach: (() -> Unit)? = null
 ) {
-    var text by remember { mutableStateOf("") }
-    val canSend = text.isNotBlank()
+    var text = remember { mutableStateOf("") }
+    val canSend = text.value.isNotBlank()
     val keyboard = LocalSoftwareKeyboardController.current
 
     Row(
@@ -206,8 +205,8 @@ fun MessageInput(
         }
 
         OutlinedTextField(
-            value = text,
-            onValueChange = { text = it },
+            value = text.value,
+            onValueChange = { text.value = it },
             modifier = Modifier.weight(1f),
             placeholder = { Text("Message") },
             singleLine = true,
@@ -215,8 +214,8 @@ fun MessageInput(
             keyboardActions = KeyboardActions(
                 onSend = {
                     if (canSend) {
-                        onSend(text.trim())
-                        text = ""
+                        onSend(text.value.trim())
+                        text.value = ""
                         keyboard?.hide()
                     }
                 }
@@ -226,8 +225,8 @@ fun MessageInput(
         IconButton(
             enabled = canSend,
             onClick = {
-                onSend(text.trim())
-                text = ""
+                onSend(text.value.trim())
+                text.value = ""
                 keyboard?.hide()
             },
             modifier = Modifier.size(48.dp)

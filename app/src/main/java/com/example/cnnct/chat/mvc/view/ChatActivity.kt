@@ -33,17 +33,20 @@ class ChatActivity : ComponentActivity() {
             val db = Firebase.firestore
             var chatType by remember { mutableStateOf("private") }
             var otherUserId by remember { mutableStateOf<String?>(null) }
+
             var nameMap by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+            var photoMap by remember { mutableStateOf<Map<String, String?>>(emptyMap()) } // per-user photos
             var memberIds by remember { mutableStateOf<List<String>>(emptyList()) }
 
             // Header fields
             var headerTitle by remember { mutableStateOf("Chat") }
             var headerSubtitle by remember { mutableStateOf<String?>(null) }
+            var headerPhotoUrl by remember { mutableStateOf<String?>(null) } // header avatar (1-1 other or group photo)
 
             // Blocked users set (optional field on chat doc)
             var blockedSet by remember { mutableStateOf<Set<String>>(emptySet()) }
 
-            // Load chat meta (type + members) and names
+            // Load chat meta (type + members) and names/photos
             LaunchedEffect(chatId) {
                 val chatSnap = db.collection("chats").document(chatId).get().await()
                 val type = chatSnap.getString("type") ?: "private"
@@ -60,26 +63,34 @@ class ChatActivity : ComponentActivity() {
                     otherUserId?.let { other ->
                         val userDoc = db.collection("users").document(other).get().await()
                         val dn = userDoc.getString("displayName") ?: "Unknown"
+                        val photo = userDoc.getString("photoUrl")
                         nameMap = mapOf(other to dn)
+                        photoMap = mapOf(other to photo)
                         headerTitle = dn
                         headerSubtitle = null
+                        headerPhotoUrl = photo // header shows other user’s photo
                     }
                 } else {
-                    // group: name map + group name + member count
-                    val ids = members.filter { it != currentUserId }
-                    val acc = mutableMapOf<String, String>()
+                    // group: name + photo per member + group header name/photo
+                    val ids = members // include self so map is complete
+                    val accNames = mutableMapOf<String, String>()
+                    val accPhotos = mutableMapOf<String, String?>()
+
                     for (chunk in ids.chunked(10)) {
                         if (chunk.isEmpty()) continue
                         val usersSnap = db.collection("users")
                             .whereIn(FieldPath.documentId(), chunk)
                             .get().await()
                         for (doc in usersSnap.documents) {
-                            acc[doc.id] = doc.getString("displayName") ?: "Unknown"
+                            accNames[doc.id] = doc.getString("displayName") ?: "Unknown"
+                            accPhotos[doc.id] = doc.getString("photoUrl")
                         }
                     }
-                    nameMap = acc
+                    nameMap = accNames
+                    photoMap = accPhotos
                     headerTitle = chatSnap.getString("groupName") ?: "Group"
                     headerSubtitle = "${members.size} members"
+                    headerPhotoUrl = chatSnap.getString("photoUrl") // optional group photo
                 }
             }
 
@@ -128,6 +139,8 @@ class ChatActivity : ComponentActivity() {
                 title = headerTitle,
                 subtitle = headerSubtitle,
                 nameOf = { uid -> nameMap[uid] ?: uid },
+                userPhotoOf = { uid: String -> photoMap[uid] },     // per-sender photo resolver (explicit type)
+                headerPhotoUrl = headerPhotoUrl,                     // header avatar photo
                 otherUserId = otherUserId,
                 otherLastReadId = otherLastReadId,
                 otherLastOpenedAtMs = otherLastOpenedAtMs,

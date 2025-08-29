@@ -46,10 +46,11 @@ fun ChatScreen(
     title: String = "Chat",
     subtitle: String? = null,
 
-    // mapping helpers
+    // mapping helpers (✅ explicit types, with safe defaults)
     nameOf: (String) -> String = { it },
-    userPhotoOf: (String) -> String? = { null }, // ← pass uid -> photoUrl
-    groupPhotoUrl: String? = null,               // ← optional header image for groups
+    userPhotoOf: (String) -> String? = { null },   // resolver for per-sender photo
+    headerPhotoUrl: String? = null,                // explicit header photo (if provided by caller)
+    groupPhotoUrl: String? = null,                 // optional header image for groups
 
     otherUserId: String? = null,
     otherLastReadId: String? = null,
@@ -176,12 +177,10 @@ fun ChatScreen(
         }
     }
 
-    // header presence + photo
+    // header presence + photo (use provided headerPhotoUrl if non-null, else derive)
     val headerPresence = if (chatType == "private") presenceFor(otherUserId) else Presence.Offline
-    val headerPhotoUrl = when {
-        chatType == "private" -> userPhotoOf(otherUserId ?: "")
-        else -> groupPhotoUrl
-    }
+    val resolvedHeaderPhoto = headerPhotoUrl
+        ?: if (chatType == "private") userPhotoOf(otherUserId ?: "") else groupPhotoUrl
 
     // delete eligibility
     val eligibility by remember(selected, messages, currentUserId) {
@@ -213,7 +212,7 @@ fun ChatScreen(
                     title = title,
                     subtitle = subtitle,
                     presence = headerPresence,
-                    photoUrl = headerPhotoUrl,
+                    photoUrl = resolvedHeaderPhoto,
                     onBack = onBack,
                     onCallClick = onCallClick
                 )
@@ -277,8 +276,7 @@ fun ChatScreen(
                             val selectedThis = selected.contains(m.id)
 
                             Row(
-                                modifier = Modifier
-                                    .fillMaxWidth(),
+                                modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = if (me) Arrangement.End else Arrangement.Start,
                                 verticalAlignment = Alignment.Top
                             ) {
@@ -287,7 +285,7 @@ fun ChatScreen(
                                     AvatarWithStatus(
                                         size = 30.dp,
                                         presence = presenceFor(m.senderId),
-                                        photoUrl = userPhotoOf(m.senderId) // ← per-message photo
+                                        photoUrl = userPhotoOf(m.senderId) // per-message photo
                                     )
                                     Spacer(Modifier.width(8.dp))
                                 }

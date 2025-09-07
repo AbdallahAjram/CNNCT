@@ -8,6 +8,9 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
 
     <application
         android:name=".App"
@@ -31,6 +34,14 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+        <service
+            android:name=".calls.PushService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT"/>
+            </intent-filter>
+        </service>
+        <receiver android:name=".calls.CallActionReceiver" android:exported="false"/>
 
         <!-- Splash/MainActivity: it extends AppCompatActivity, so give it an AppCompat theme.
              This fixes: "You need to use a Theme.AppCompat theme (or descendant) with this activity." -->
@@ -86,5 +97,15 @@
             android:name="com.canhub.cropper.CropImageActivity"
             android:theme="@style/Theme.MaterialComponents.DayNight.DarkActionBar"
             tools:replace="android:theme" />
+
+        <activity
+            android:name=".calls.IncomingCallActivity"
+            android:exported="true"
+            android:immersive="true"
+            android:showOnLockScreen="true"
+            android:turnScreenOn="true"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
+
     </application>
 </manifest>

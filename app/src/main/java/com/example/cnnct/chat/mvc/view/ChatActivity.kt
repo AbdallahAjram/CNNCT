@@ -2,20 +2,22 @@ package com.example.cnnct.chat.view
 
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.annotation.RequiresApi
 import androidx.compose.runtime.*
+import androidx.compose.ui.platform.LocalContext
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.firestore
 import kotlinx.coroutines.tasks.await
-
 import com.cnnct.chat.mvc.model.FirestoreChatRepository
 import com.cnnct.chat.mvc.controller.ChatController
 import com.cnnct.chat.mvc.view.ChatScreen
+import com.example.cnnct.calls.controller.CallsController
 import com.example.cnnct.homepage.controller.HomePController
 
 class ChatActivity : ComponentActivity() {
@@ -30,23 +32,22 @@ class ChatActivity : ComponentActivity() {
         val controller = ChatController(repo, currentUserId)
 
         setContent {
+            val context = LocalContext.current // ✅ use inside Compose
             val db = Firebase.firestore
             var chatType by remember { mutableStateOf("private") }
             var otherUserId by remember { mutableStateOf<String?>(null) }
 
             var nameMap by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
-            var photoMap by remember { mutableStateOf<Map<String, String?>>(emptyMap()) } // per-user photos
+            var photoMap by remember { mutableStateOf<Map<String, String?>>(emptyMap()) }
             var memberIds by remember { mutableStateOf<List<String>>(emptyList()) }
 
-            // Header fields
             var headerTitle by remember { mutableStateOf("Chat") }
             var headerSubtitle by remember { mutableStateOf<String?>(null) }
-            var headerPhotoUrl by remember { mutableStateOf<String?>(null) } // header avatar (1-1 other or group photo)
+            var headerPhotoUrl by remember { mutableStateOf<String?>(null) }
 
-            // Blocked users set (optional field on chat doc)
             var blockedSet by remember { mutableStateOf<Set<String>>(emptySet()) }
 
-            // Load chat meta (type + members) and names/photos
+            // Load chat meta
             LaunchedEffect(chatId) {
                 val chatSnap = db.collection("chats").document(chatId).get().await()
                 val type = chatSnap.getString("type") ?: "private"
@@ -55,7 +56,6 @@ class ChatActivity : ComponentActivity() {
                 val members = (chatSnap.get("members") as? List<String>).orEmpty()
                 memberIds = members
 
-                // Optional "blocked" list on chat doc
                 blockedSet = (chatSnap.get("blocked") as? List<String>)?.toSet() ?: emptySet()
 
                 if (type == "private") {
@@ -68,14 +68,12 @@ class ChatActivity : ComponentActivity() {
                         photoMap = mapOf(other to photo)
                         headerTitle = dn
                         headerSubtitle = null
-                        headerPhotoUrl = photo // header shows other user’s photo
+                        headerPhotoUrl = photo
                     }
                 } else {
-                    // group: name + photo per member + group header name/photo
-                    val ids = members // include self so map is complete
+                    val ids = members
                     val accNames = mutableMapOf<String, String>()
                     val accPhotos = mutableMapOf<String, String?>()
-
                     for (chunk in ids.chunked(10)) {
                         if (chunk.isEmpty()) continue
                         val usersSnap = db.collection("users")
@@ -90,16 +88,16 @@ class ChatActivity : ComponentActivity() {
                     photoMap = accPhotos
                     headerTitle = chatSnap.getString("groupName") ?: "Group"
                     headerSubtitle = "${members.size} members"
-                    headerPhotoUrl = chatSnap.getString("photoUrl") // optional group photo
+                    headerPhotoUrl = chatSnap.getString("photoUrl")
                 }
             }
 
-            // Member meta (read/open states)
+            // Member meta
             val memberMeta by produceState<Map<String, Any>?>(initialValue = null, chatId) {
                 repo.streamChatMemberMeta(chatId).collect { value = it }
             }
 
-            // Per-member lastOnlineAt map (for status dots)
+            // Last online map
             val membersOnlineMap by produceState<Map<String, Long?>>(initialValue = emptyMap(), memberIds) {
                 if (memberIds.isEmpty()) { value = emptyMap(); return@produceState }
                 val dbLocal = Firebase.firestore
@@ -117,7 +115,7 @@ class ChatActivity : ComponentActivity() {
                 awaitDispose { listeners.forEach { it.remove() } }
             }
 
-            // 1-1 extras (kept for ticks)
+            // 1-1 extras for ticks
             val otherMetaFromChat by produceState<Map<String, Any>?>(initialValue = null, chatId) {
                 repo.streamChatMemberMeta(chatId).collect { value = it }
             }
@@ -139,19 +137,29 @@ class ChatActivity : ComponentActivity() {
                 title = headerTitle,
                 subtitle = headerSubtitle,
                 nameOf = { uid -> nameMap[uid] ?: uid },
-                userPhotoOf = { uid: String -> photoMap[uid] },     // per-sender photo resolver (explicit type)
-                headerPhotoUrl = headerPhotoUrl,                     // header avatar photo
+                userPhotoOf = { uid: String -> photoMap[uid] },
+                headerPhotoUrl = headerPhotoUrl,
                 otherUserId = otherUserId,
                 otherLastReadId = otherLastReadId,
                 otherLastOpenedAtMs = otherLastOpenedAtMs,
                 memberIds = memberIds,
                 memberMeta = memberMeta,
-                // status data
                 blockedUserIds = blockedSet,
                 onlineMap = membersOnlineMap,
                 onBack = { finish() },
                 onCallClick = {
-                    // TODO integrate call flow (Agora/Twilio/etc.)
+                    val calleeId = otherUserId ?: return@ChatScreen
+                    val callsController = CallsController(context)
+
+                    callsController.startCall(
+                        calleeId,
+                        onCreated = {
+                            Toast.makeText(context, "Calling...", Toast.LENGTH_SHORT).show()
+                        },
+                        onError = { error ->
+                            Toast.makeText(context, "Failed to start call: ${error.message}", Toast.LENGTH_LONG).show()
+                        }
+                    )
                 }
             )
         }

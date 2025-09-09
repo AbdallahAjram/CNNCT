@@ -6,19 +6,15 @@ plugins {
 
 android {
     namespace = "com.example.cnnct"
-    compileSdk = 36
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.example.cnnct"
         minSdk = 24
-        targetSdk = 36
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        // Custom BuildConfig fields
-        buildConfigField("String", "AGORA_APP_ID", "\"3678d2cf11ad47579391de324b308fcd\"")
-        buildConfigField("String", "AGORA_TOKEN_URL", "\"https://get-agora-token-840694397310.europe-west1.run.app\"")
     }
 
     buildTypes {
@@ -42,25 +38,15 @@ android {
 
     buildFeatures {
         compose = true
-        buildConfig = true // enable BuildConfig generation for your buildConfigField
     }
 
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.11"
     }
-
-    // If you later need to add packaging or other settings, do it here.
 }
 
 dependencies {
-    implementation("com.squareup.okhttp3:okhttp:5.1.0")
-    implementation("com.squareup.moshi:moshi:1.15.2")
-    implementation("com.squareup.moshi:moshi-kotlin:1.15.2")
-    implementation("io.agora.rtc:full-sdk:4.6.0")
-    implementation("com.vanniktech:android-image-cropper:4.6.0")
-
-    // Compose BOM
-    implementation(platform("androidx.compose:compose-bom:2025.08.01"))
+    implementation(platform("androidx.compose:compose-bom:2025.06.00"))
     implementation("androidx.activity:activity-compose")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
@@ -68,34 +54,37 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     implementation("androidx.compose.material:material-icons-extended")
+    implementation("com.vanniktech:android-image-cropper:4.6.0")
 
-    // Firebase BoM & artifacts
-    implementation(platform("com.google.firebase:firebase-bom:34.2.0"))
-    implementation("com.google.firebase:firebase-auth")
-    implementation("com.google.firebase:firebase-firestore")
-    implementation("com.google.firebase:firebase-storage")
-    implementation("com.google.firebase:firebase-messaging")
-    implementation("com.google.android.gms:play-services-auth:21.4.0")
 
-    // Coroutines, Coil, Media3, etc.
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.2")
-    implementation("io.coil-kt:coil-compose:2.7.0")
-    implementation("io.coil-kt:coil-video:2.7.0")
-    implementation("androidx.media3:media3-exoplayer:1.8.0")
-    implementation("androidx.media3:media3-ui:1.8.0")
-    implementation("androidx.media3:media3-datasource:1.8.0")
-    implementation("androidx.media3:media3-datasource-okhttp:1.8.0")
+    implementation("io.agora.rtc:full-sdk:4.6.0")
+    // Core Moshi runtime
+    implementation("com.squareup.moshi:moshi:1.15.2")
 
-    // AndroidX core / appcompat / material / lifecycle
-    implementation("androidx.core:core-ktx:1.17.0")
-    implementation("androidx.appcompat:appcompat:1.7.1")
-    implementation("com.google.android.material:material:1.13.0")
+// Kotlin adapter (adds support for data classes, nullability, etc.)
+    implementation("com.squareup.moshi:moshi-kotlin:1.15.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1") // or newer
+    implementation("io.coil-kt:coil-compose:2.6.0")
+    implementation("androidx.media3:media3-exoplayer:1.3.1")
+    implementation("androidx.media3:media3-ui:1.3.1")
+    implementation("androidx.media3:media3-datasource:1.3.1")
+    implementation("androidx.media3:media3-datasource-okhttp:1.3.1")
+    implementation("io.coil-kt:coil-compose:2.6.0")
+    implementation("io.coil-kt:coil-video:2.6.0")
+    implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.core:core-splashscreen:1.0.1")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.3")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.3")
-    implementation("androidx.lifecycle:lifecycle-process:2.9.3")
-
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
+    implementation("androidx.lifecycle:lifecycle-process:2.8.4")
+    implementation(platform("com.google.firebase:firebase-bom:32.7.4"))
+    implementation("com.google.android.gms:play-services-auth:20.7.0")
+    implementation("com.google.firebase:firebase-auth-ktx")
+    implementation("com.google.firebase:firebase-firestore-ktx")
+    implementation("com.google.firebase:firebase-storage-ktx")
+    implementation("com.google.firebase:firebase-messaging-ktx")
     testImplementation("junit:junit:4.13.2")
-    androidTestImplementation("androidx.test.ext:junit:1.3.0")
-    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
 }

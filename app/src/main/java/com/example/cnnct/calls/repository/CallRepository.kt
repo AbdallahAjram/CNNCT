@@ -1,5 +1,6 @@
 package com.example.cnnct.calls.repository
 
+import android.util.Log
 import com.example.cnnct.calls.model.CallDoc
 import com.example.cnnct.calls.model.UserCallLog
 import com.google.firebase.Timestamp
@@ -8,7 +9,6 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import kotlinx.coroutines.tasks.await
-import java.util.*
 
 class CallRepository(
     private val db: FirebaseFirestore = FirebaseFirestore.getInstance(),
@@ -17,8 +17,13 @@ class CallRepository(
     private val callsCol = db.collection("calls")
     private val userCallsRoot = db.collection("userCalls") // userCalls/{uid}/calls/{callId}
 
-    private fun currentUid(): String = auth.currentUser?.uid ?: throw IllegalStateException("Not signed in")
+    private fun currentUid(): String =
+        auth.currentUser?.uid ?: throw IllegalStateException("Not signed in")
 
+    /**
+     * Create a call doc with a **client-side timestamp**.
+     * Safer if your Firestore rules require a concrete timestamp for `createdAt`.
+     */
     suspend fun createCall(calleeId: String, channelId: String): String {
         val callId = callsCol.document().id
         val call = CallDoc(
@@ -29,28 +34,76 @@ class CallRepository(
             status = "ringing",
             createdAt = Timestamp.now()
         )
-        callsCol.document(callId).set(call).await()
+        try {
+            callsCol.document(callId).set(call).await()
+            Log.d("CallRepo", "createCall SUCCESS: $callId")
+        } catch (e: Exception) {
+            Log.e("CallRepo", "createCall FAILED for $callId", e)
+            throw e
+        }
         return callId
     }
 
-    suspend fun updateCallStatus(callId: String, status: String, startedAt: Timestamp? = null, endedAt: Timestamp? = null, duration: Long? = null, endedReason: String? = null) {
-        val data = mutableMapOf<String, Any>("status" to status, "updatedAt" to Timestamp.now())
+    /**
+     * Create a call doc with a **server timestamp**.
+     * Requires Firestore rules to allow `FieldValue.serverTimestamp()`.
+     */
+    suspend fun createCallDoc(calleeId: String, channelId: String): String {
+        val callId = db.collection("calls").document().id
+        val callerUid = auth.currentUser?.uid ?: throw IllegalStateException("Not signed in")
+        val call = mapOf(
+            "callId" to callId,
+            "callerId" to callerUid,
+            "calleeId" to calleeId,
+            "channelId" to channelId,
+            "status" to "ringing",
+            "createdAt" to FieldValue.serverTimestamp()
+        )
+        try {
+            db.collection("calls").document(callId).set(call).await()
+            Log.d("CallRepo", "createCallDoc SUCCESS: $callId")
+        } catch (e: Exception) {
+            Log.e("CallRepo", "createCallDoc FAILED for $callId", e)
+            throw e
+        }
+        return callId
+    }
+
+    /**
+     * Update call status and optional metadata.
+     */
+    suspend fun updateCallStatus(
+        callId: String,
+        status: String,
+        startedAt: Timestamp? = null,
+        endedAt: Timestamp? = null,
+        duration: Long? = null,
+        endedReason: String? = null
+    ) {
+        val data = mutableMapOf<String, Any>(
+            "status" to status,
+            "updatedAt" to Timestamp.now()
+        )
         startedAt?.let { data["startedAt"] = it }
         endedAt?.let { data["endedAt"] = it }
         duration?.let { data["duration"] = it }
         endedReason?.let { data["endedReason"] = it }
-        callsCol.document(callId).update(data).await()
+
+        try {
+            callsCol.document(callId).update(data).await()
+            Log.d("CallRepo", "updateCallStatus SUCCESS: $callId -> $status")
+        } catch (e: Exception) {
+            Log.e("CallRepo", "updateCallStatus FAILED for $callId", e)
+            throw e
+        }
     }
 
+    /**
+     * Write call logs for the **current user only**.
+     * Cloud Functions should be used to write logs for the other peer.
+     */
     suspend fun writeUserCallLogsForEnd(callId: String, callDoc: CallDoc) {
-        // Write a single call-log entry for the current signed-in user only.
-        // Do NOT attempt to write the other user's userCalls entry from this client
-        // — that will be rejected by secure rules. Use a server/Cloud Function if you need
-        // to create both sides atomically.
-
-        val me = currentUid() // throws if not signed in
-
-        // Determine which side I am and set direction/peerId accordingly
+        val me = currentUid()
         val (peerId, direction) = if (me == callDoc.callerId) {
             callDoc.calleeId to "outgoing"
         } else {
@@ -69,18 +122,26 @@ class CallRepository(
             duration = callDoc.duration
         )
 
-        // write to userCalls/{me}/calls/{callId}
-        userCallsRoot.document(me)
-            .collection("calls")
-            .document(callId)
-            .set(log)
-            .await()
+        try {
+            userCallsRoot.document(me)
+                .collection("calls")
+                .document(callId)
+                .set(log)
+                .await()
+            Log.d("CallRepo", "writeUserCallLogsForEnd SUCCESS: $callId for $me")
+        } catch (e: Exception) {
+            Log.e("CallRepo", "writeUserCallLogsForEnd FAILED for $callId for $me", e)
+            throw e
+        }
     }
 
-
+    /**
+     * Listen to changes on a specific call document.
+     */
     fun listenToCall(callId: String, callback: (CallDoc?) -> Unit) {
         callsCol.document(callId).addSnapshotListener { snap, e ->
             if (e != null) {
+                Log.e("CallRepo", "listenToCall ERROR for $callId", e)
                 callback(null)
                 return@addSnapshotListener
             }
@@ -91,57 +152,59 @@ class CallRepository(
         }
     }
 
+    /**
+     * Fetch a user's call logs in descending order of start time.
+     */
     fun fetchUserCallLogs(uid: String, onUpdate: (List<UserCallLog>) -> Unit) {
         userCallsRoot.document(uid)
             .collection("calls")
             .orderBy("startedAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
             .addSnapshotListener { snaps, err ->
                 if (err != null) {
+                    Log.e("CallRepo", "fetchUserCallLogs ERROR for $uid", err)
                     onUpdate(emptyList())
                     return@addSnapshotListener
                 }
-                val list = snaps?.documents?.mapNotNull { it.toObject(UserCallLog::class.java) } ?: emptyList()
+                val list = snaps?.documents?.mapNotNull { it.toObject(UserCallLog::class.java) }
+                    ?: emptyList()
                 onUpdate(list)
             }
     }
 
+    /**
+     * Get a call doc once.
+     */
     suspend fun getCall(callId: String): CallDoc? {
-        val snap = callsCol.document(callId).get().await()
-        return snap?.toObject(CallDoc::class.java)
+        return try {
+            val snap = callsCol.document(callId).get().await()
+            snap?.toObject(CallDoc::class.java)
+        } catch (e: Exception) {
+            Log.e("CallRepo", "getCall FAILED for $callId", e)
+            null
+        }
     }
 
-    suspend fun createCallDoc(calleeId: String, channelId: String): String {
-        val callId = db.collection("calls").document().id
-        val call = mapOf(
-            "callId" to callId,
-            "callerId" to auth.currentUser!!.uid,
-            "calleeId" to calleeId,
-            "channelId" to channelId,
-            "status" to "ringing",
-            "createdAt" to FieldValue.serverTimestamp()
-        )
-        db.collection("calls").document(callId).set(call).await()
-        return callId
-    }
-
-
+    /**
+     * Watch for incoming ringing calls directed at the current user.
+     */
     fun watchIncomingCallsForMe(onUpdate: (CallDoc?) -> Unit): ListenerRegistration {
-        val me = auth.currentUser?.uid ?: return object: ListenerRegistration {
+        val me = auth.currentUser?.uid ?: return object : ListenerRegistration {
             override fun remove() {}
         }
 
-        // Listen to ringing calls targeted at me (latest first)
         return callsCol
             .whereEqualTo("calleeId", me)
             .whereEqualTo("status", "ringing")
             .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
             .limit(1)
             .addSnapshotListener { snap, e ->
-                if (e != null) { onUpdate(null); return@addSnapshotListener }
+                if (e != null) {
+                    Log.e("CallRepo", "watchIncomingCallsForMe ERROR for $me", e)
+                    onUpdate(null)
+                    return@addSnapshotListener
+                }
                 val doc = snap?.documents?.firstOrNull()?.toObject(CallDoc::class.java)
                 onUpdate(doc)
             }
     }
-
-
 }

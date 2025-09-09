@@ -1,81 +1,90 @@
 package com.example.cnnct.calls
 
-import android.os.Build
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.lifecycle.lifecycleScope
 import com.example.cnnct.calls.controller.CallsController
 import com.example.cnnct.calls.view.IncomingCallScreen
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 class IncomingCallActivity : ComponentActivity() {
     private lateinit var callsController: CallsController
     private var callId: String? = null
     private var callerId: String? = null
-    private var channelId: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Read extras (what you should pass when launching the Activity)
+        callsController = CallsController(this)
+
         callId = intent.getStringExtra("callId")
         callerId = intent.getStringExtra("callerId")
-        channelId = intent.getStringExtra("channelId")
 
-        // If the activity was launched without a callId, bail out
-        if (callId.isNullOrBlank()) {
-            finish()
-            return
-        }
-
-        // Make the Activity show on lockscreen and turn screen on (best-effort)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            setShowWhenLocked(true)
-            setTurnScreenOn(true)
-        } else {
-            window.addFlags(
-                android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                        android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-            )
-        }
-
-        // Init controller
-        callsController = CallsController(this)
+        // Start the incoming watcher so CallsController will populate incomingCall flow.
+        callsController.startIncomingWatcher()
 
         setContent {
             IncomingCallScreen(
-                callerId = callerId ?: "Unknown",
-                onAccept = {
-                    // Accept the call: update Firestore state via controller
-                    lifecycleScope.launch {
-                        try {
-                            callId?.let { id -> callsController.acceptCall(id) }
-                        } catch (t: Throwable) {
-                            // ignore — controller already logs errors; optionally show UI
-                        } finally {
-                            // Close the incoming UI; the app should navigate to the in-call UI if needed
-                            finish()
-                        }
-                    }
-                },
-                onReject = {
-                    lifecycleScope.launch {
-                        try {
-                            callId?.let { id -> callsController.rejectCall(id) }
-                        } catch (t: Throwable) {
-                            // ignore
-                        } finally {
-                            finish()
-                        }
-                    }
-                }
+                callerId = callerId ?: "Unknown caller",
+                onAccept = { handleAccept() },
+                onReject = { handleReject() }
             )
         }
+
+        // Observe incoming call updates and react (accepted / in-progress / ended)
+        lifecycleScope.launch {
+            callsController.incomingCall.collectLatest { callDoc ->
+                if (callDoc == null) return@collectLatest
+                // If this activity was opened for a specific callId, only react to that call
+                if (callId != null && callDoc.callId != callId) return@collectLatest
+
+                when (callDoc.status) {
+                    "accepted" -> {
+                        // controller will handle Agora join; wait for "in-progress" then open in-call UI
+                    }
+                    "in-progress" -> {
+                        // Launch the in-call activity
+                        val i = Intent(this@IncomingCallActivity, InCallActivity::class.java).apply {
+                            putExtra("callId", callDoc.callId)
+                            putExtra("callerId", callDoc.callerId)
+                        }
+                        startActivity(i)
+                        finish()
+                    }
+                    "rejected", "missed", "ended" -> {
+                        // Call was declined / missed / ended - close incoming UI
+                        finish()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun handleAccept() {
+        val id = callId
+        if (id == null) {
+            finish()
+            return
+        }
+        callsController.acceptCall(id)
+    }
+
+    private fun handleReject() {
+        val id = callId
+        if (id == null) {
+            finish()
+            return
+        }
+        callsController.rejectCall(id)
+        finish()
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        callsController.stopIncomingWatcher()
         callsController.clear()
     }
 }

@@ -1,5 +1,6 @@
 package com.example.cnnct.chat.view
 
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
@@ -17,6 +18,7 @@ import kotlinx.coroutines.tasks.await
 import com.cnnct.chat.mvc.model.FirestoreChatRepository
 import com.cnnct.chat.mvc.controller.ChatController
 import com.cnnct.chat.mvc.view.ChatScreen
+import com.example.cnnct.calls.InCallActivity
 import com.example.cnnct.calls.controller.CallsController
 import com.example.cnnct.homepage.controller.HomePController
 
@@ -154,13 +156,14 @@ class ChatActivity : ComponentActivity() {
                     callsController.startCall(
                         calleeId,
                         onCreated = {
-                            Toast.makeText(context, "Calling...", Toast.LENGTH_SHORT).show()
+                            //calls controller will take care of it
                         },
                         onError = { error ->
                             Toast.makeText(context, "Failed to start call: ${error.message}", Toast.LENGTH_LONG).show()
                         }
                     )
                 }
+
             )
         }
     }

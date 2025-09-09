@@ -106,6 +106,7 @@
             android:turnScreenOn="true"
             android:launchMode="singleTop"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
+        <activity android:name=".calls.InCallActivity" android:exported="false"/>
 
     </application>
 </manifest>

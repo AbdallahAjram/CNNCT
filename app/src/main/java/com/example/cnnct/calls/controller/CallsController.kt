@@ -1,5 +1,6 @@
 package com.example.cnnct.calls.controller
 
+import android.content.Intent
 import android.content.Context
 import com.example.cnnct.agora.AgoraManager
 import com.example.cnnct.calls.model.CallDoc
@@ -46,7 +47,8 @@ class CallsController(
         AgoraManager.init(context, AGORA_APP_ID)
     }
 
-    fun startCall(
+    
+fun startCall(
         calleeId: String,
         onCreated: (callId: String) -> Unit,
         onError: (Throwable) -> Unit
@@ -57,6 +59,19 @@ class CallsController(
                 val callId = repo.createCall(calleeId, channelId)
                 currentCallId = callId
 
+                // launch the in-call UI for the caller immediately
+                try {
+                    val intent = Intent(context, com.example.cnnct.calls.InCallActivity::class.java).apply {
+                        putExtra("callId", callId)
+                        putExtra("callerId", FirebaseAuth.getInstance().currentUser?.uid ?: "")
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(intent)
+                } catch (t: Throwable) {
+                    // ignore UI launch errors here, continue to listen for call updates
+                    t.printStackTrace()
+                }
+
                 // listen for updates for this call (repo exposes listenToCall)
                 repo.listenToCall(callId) { callDoc -> callDoc?.let { handleCallUpdate(it) } }
 
@@ -65,25 +80,6 @@ class CallsController(
             } catch (t: Throwable) {
                 onError(t)
             }
-        }
-    }
-
-    private fun handleCallUpdate(call: CallDoc) {
-        _incomingCall.value = call
-        when (call.status) {
-            "accepted" -> {
-                scope.launch {
-                    try {
-                        val tokenResponse = requestAgoraToken(call.channelId)
-                        AgoraManager.joinChannel(tokenResponse.token, call.channelId, 0)
-                        repo.updateCallStatus(call.callId, "in-progress", startedAt = Timestamp.now())
-                    } catch (e: Throwable) {
-                        // log and propagate if desired
-                        e.printStackTrace()
-                    }
-                }
-            }
-            "ended" -> finalizeCall(call)
         }
     }
 
@@ -213,4 +209,32 @@ class CallsController(
         incomingWatcher = null
         _incomingCall.value = null
     }
+    private fun handleCallUpdate(call: CallDoc) {
+        when (call.status) {
+            "accepted", "in-progress" -> {
+                // Join the Agora channel if not already joined
+                call.channelId?.let { channel ->
+                    scope.launch {
+                        try {
+                            val tokenResponse = requestAgoraToken(channel)
+                            val token = tokenResponse.token ?: return@launch
+                            val uid = tokenResponse.uid ?: 0
+                            AgoraManager.joinChannel(token, channel, uid)
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                }
+            }
+
+            "rejected", "missed", "ended" -> {
+                // Leave Agora channel and finalize call
+                AgoraManager.leaveChannel()
+                finalizeCall(call)
+                currentCallId = null
+                cancelRingTimeout()
+            }
+        }
+    }
+
 }

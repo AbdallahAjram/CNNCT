@@ -13,11 +13,13 @@ fun IncomingCallScreen(callerId: String, onAccept: () -> Unit, onReject: () -> U
         Column(
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.fillMaxSize().padding(24.dp)
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp)
         ) {
-            Text("Incoming call", style = MaterialTheme.typography.headlineSmall)
+            Text("Incoming call", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(8.dp))
-            Text(callerId, style = MaterialTheme.typography.titleLarge)
+            Text(callerId, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(24.dp))
             Row {
                 Button(onClick = onReject, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {

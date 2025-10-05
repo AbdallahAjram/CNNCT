@@ -26,14 +26,11 @@ fun ChatListItem(
     currentUserId: String,
     userMap: Map<String, String>,
     onClick: () -> Unit,
-    // Presence inputs (unchanged)
-    onlineMap: Map<String, Long?> = emptyMap(),   // uid -> lastOnlineAt (ms)
-    blockedUserIds: Set<String> = emptySet(),     // future use
-    presenceWindowMs: Long = 2 * 60 * 1000L,     // 2 minutes
-    // NEW: optional photo URL for the row avatar (peer for private, group photo for group)
+    onlineMap: Map<String, Long?> = emptyMap(),
+    blockedUserIds: Set<String> = emptySet(),
+    presenceWindowMs: Long = 2 * 60 * 1000L,
     photoUrl: String? = null
 ) {
-    // -------- Resolve name ----------
     val chatName = when (chatSummary.type) {
         "group" -> {
             Log.d("ChatListItem", "Group chat → groupName=${chatSummary.groupName}")
@@ -52,7 +49,6 @@ fun ChatListItem(
     }
     Log.d("ChatListItem", "Resolved chatName → $chatName")
 
-    // -------- Presence (same as your ChatScreen logic) ----------
     fun presenceFor(uid: String?): Presence {
         if (uid == null) return Presence.Offline
         if (blockedUserIds.contains(uid)) return Presence.Blocked
@@ -61,17 +57,15 @@ fun ChatListItem(
         return if (last != null && now - last <= presenceWindowMs) Presence.Online else Presence.Offline
     }
 
-    // For PRIVATE chats: presence of the *other* user.
-    // For GROUP chats: single dot (offline) like header.
     val presence = when (chatSummary.type) {
         "private" -> presenceFor(chatSummary.members.firstOrNull { it != currentUserId })
         else      -> Presence.Offline
     }
 
     val statusColor = when (presence) {
-        Presence.Blocked -> Color(0xFFFF3B30)  // red
-        Presence.Online  -> Color(0xFF34C759)  // green
-        Presence.Offline -> Color(0xFF9CA3AF)  // gray
+        Presence.Blocked -> Color(0xFFFF3B30)
+        Presence.Online  -> Color(0xFF34C759)
+        Presence.Offline -> Color(0xFF9CA3AF)
     }
 
     Card(
@@ -88,17 +82,15 @@ fun ChatListItem(
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // ---------- Avatar with status dot (dynamic URL + fallback handled inside UserAvatar) ----------
             Box(
                 modifier = Modifier.size(48.dp),
                 contentAlignment = Alignment.BottomEnd
             ) {
                 UserAvatar(
-                    photoUrl = photoUrl,   // ← pass peer/group url when you have it; null uses default drawable
+                    photoUrl = photoUrl,
                     size = 48.dp,
                     contentDescription = "Avatar"
                 )
-                // Dot (bottom-right) with a small white ring
                 Box(
                     modifier = Modifier
                         .size(14.dp)
@@ -111,11 +103,7 @@ fun ChatListItem(
 
             Spacer(Modifier.width(12.dp))
 
-            // ---------- Middle: name + last message ----------
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
-                // Top row: name + timestamp
+            Column(modifier = Modifier.weight(1f)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -139,14 +127,13 @@ fun ChatListItem(
 
                 Spacer(Modifier.height(4.dp))
 
-                // Bottom row: message preview + ticks
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val rawText = chatSummary.lastMessageText.takeIf { it.isNotBlank() } ?: "No messages yet"
+                    val hasText = chatSummary.lastMessageText.isNotBlank()
+                    val rawText = if (hasText) chatSummary.lastMessageText else "No messages yet"
 
-                    // Prefix sender for groups
                     val senderLabel: String? =
                         if (chatSummary.type == "group" && !chatSummary.lastMessageSenderId.isNullOrBlank()) {
                             if (chatSummary.lastMessageSenderId == currentUserId) "You"
@@ -164,13 +151,13 @@ fun ChatListItem(
                         modifier = Modifier.weight(1f)
                     )
 
-                    // Show ticks only if YOU sent the last message
-                    if (chatSummary.lastMessageSenderId == currentUserId && chatSummary.lastMessageText.isNotBlank()) {
+                    // ticks only if you sent and there's message text
+                    if (hasText && chatSummary.lastMessageSenderId == currentUserId) {
                         val effectiveStatus = chatSummary.lastMessageStatus
                             ?: if (chatSummary.lastMessageIsRead) "read" else "delivered"
 
                         val (ticks, tickColor) = when (effectiveStatus) {
-                            "read"      -> "✓✓" to Color(0xFF34B7F1) // WhatsApp blue
+                            "read"      -> "✓✓" to Color(0xFF34B7F1)
                             "delivered" -> "✓✓" to MaterialTheme.colorScheme.onSurfaceVariant
                             "sent"      -> "✓"  to MaterialTheme.colorScheme.onSurfaceVariant
                             else        -> null  to Color.Transparent

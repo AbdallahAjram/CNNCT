@@ -1,50 +1,148 @@
+// app/src/main/java/com/example/cnnct/calls/view/CallRow.kt
 package com.example.cnnct.calls.view
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.rounded.NorthEast
+import androidx.compose.material.icons.rounded.SouthWest
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import com.example.cnnct.calls.model.UserCallLog
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import com.google.firebase.Timestamp
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
+import com.example.cnnct.R
+import com.example.cnnct.calls.model.UserCallLog
 import java.text.SimpleDateFormat
 import java.util.*
 
 @Composable
-fun CallRow(log: UserCallLog, onClick: () -> Unit) {
-    val isMissed = log.status == "missed"
-    val arrow = if (log.direction == "outgoing") Icons.Default.ArrowUpward else Icons.Default.ArrowDownward
-    val formatter = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
-    val timeText = log.startedAt?.toDate()?.let { formatter.format(it) } ?: "—"
+fun CallRow(
+    log: UserCallLog,
+    onClick: () -> Unit,
+    peerName: String? = null,
+    peerPhotoUrl: String? = null,
+    avatarSize: Dp = 48.dp
+) {
+    val isIncoming = log.direction == "incoming"
+    val arrow = if (isIncoming) Icons.Rounded.SouthWest else Icons.Rounded.NorthEast
 
-    Row(modifier = Modifier
-        .fillMaxWidth()
-        .padding(vertical = 8.dp)
-        .clickable { onClick() },
+    // Declined (rejected) now red like missed
+    val arrowColor = when {
+        log.status == "missed" || log.status == "rejected" -> Color(0xFFD32F2F) // red
+        isIncoming && log.status == "answered" -> Color(0xFF2E7D32) // green for answered incoming
+        else -> MaterialTheme.colorScheme.primary // outgoing answered or ended
+    }
+
+    val ts = (log.endedAt ?: log.startedAt)?.toDate()
+    val timeText = ts?.let { SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()).format(it) } ?: "—"
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Surface(shape = CircleShape, tonalElevation = 2.dp, modifier = Modifier.size(48.dp)) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(arrow, contentDescription = null, modifier = Modifier.size(24.dp), tint = if (isMissed) Color.Red else Color.Unspecified)
+        AvatarThumb(photoUrl = peerPhotoUrl, size = avatarSize)
+
+        Spacer(Modifier.width(12.dp))
+
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = peerName ?: log.peerId,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    color = arrowColor.copy(alpha = 0.15f),
+                    contentColor = arrowColor,
+                    shape = RoundedCornerShape(999.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Icon(arrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = statusLabel(log.status),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
+                        )
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = timeText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = log.peerId, style = MaterialTheme.typography.bodyLarge) // replace peerId with displayName lookup if you want
-            Text(text = timeText, style = MaterialTheme.typography.bodySmall)
-        }
-        if (log.duration != null && log.duration > 0) {
-            val mins = log.duration / 60
-            val secs = log.duration % 60
-            Text(String.format("%d:%02d", mins, secs), style = MaterialTheme.typography.bodySmall)
+
+        val dur = log.duration?.takeIf { it > 0 }
+        if (dur != null) {
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = formatDuration(dur),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
+}
+
+@Composable
+private fun AvatarThumb(photoUrl: String?, size: Dp) {
+    val shape = CircleShape
+    if (photoUrl.isNullOrBlank()) {
+        Image(
+            painter = painterResource(R.drawable.defaultpp),
+            contentDescription = "Avatar",
+            modifier = Modifier
+                .size(size)
+                .clip(shape)
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentScale = ContentScale.Crop
+        )
+    } else {
+        AsyncImage(
+            model = photoUrl,
+            contentDescription = "Avatar",
+            modifier = Modifier
+                .size(size)
+                .clip(shape),
+            contentScale = ContentScale.Crop
+        )
+    }
+}
+
+private fun statusLabel(status: String?): String = when (status) {
+    "answered", "in-progress", "accepted" -> "Answered"
+    "missed" -> "Missed"
+    "rejected" -> "Declined"
+    "ended" -> "Ended"
+    else -> status ?: "—"
+}
+
+private fun formatDuration(totalSec: Long): String {
+    val h = totalSec / 3600
+    val m = (totalSec % 3600) / 60
+    val s = totalSec % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
 }

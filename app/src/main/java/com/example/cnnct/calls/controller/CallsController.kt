@@ -1,8 +1,11 @@
+// File: app/src/main/java/com/example/cnnct/calls/controller/CallsController.kt
 package com.example.cnnct.calls.controller
 
-import android.content.Intent
 import android.content.Context
+import android.content.Intent
+import android.util.Log
 import com.example.cnnct.agora.AgoraManager
+import com.example.cnnct.calls.InCallActivity
 import com.example.cnnct.calls.model.CallDoc
 import com.example.cnnct.calls.repository.CallRepository
 import com.google.firebase.Timestamp
@@ -11,44 +14,39 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
 import kotlinx.coroutines.*
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.tasks.await
-import java.util.*
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
-import okhttp3.MediaType.Companion.toMediaType
-import com.squareup.moshi.Moshi
+import java.util.*
 
 private const val AGORA_APP_ID = "3678d2cf11ad47579391de324b308fcd"
 private const val AGORA_TOKEN_URL = "https://get-agora-token-840694397310.europe-west1.run.app"
 
 class CallsController(
     private val context: Context,
-    private val repo: CallRepository = CallRepository()
+    val repo: CallRepository = CallRepository()
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _incomingCall = MutableStateFlow<CallDoc?>(null)
     val incomingCall: StateFlow<CallDoc?> = _incomingCall
 
-    // Firestore + Auth used by the watcher
     private val db = FirebaseFirestore.getInstance()
     private val auth = FirebaseAuth.getInstance()
 
-    // listener registrations
     private var incomingWatcher: ListenerRegistration? = null
-
     private var currentCallId: String? = null
     private var ringTimeoutJob: Job? = null
 
     init {
+        Log.d("CallsController", "Init: AgoraManager.init()")
         AgoraManager.init(context, AGORA_APP_ID)
     }
 
-    
-fun startCall(
+    fun startCall(
         calleeId: String,
         onCreated: (callId: String) -> Unit,
         onError: (Throwable) -> Unit
@@ -59,25 +57,26 @@ fun startCall(
                 val callId = repo.createCall(calleeId, channelId)
                 currentCallId = callId
 
-                // launch the in-call UI for the caller immediately
-                try {
-                    val intent = Intent(context, com.example.cnnct.calls.InCallActivity::class.java).apply {
-                        putExtra("callId", callId)
-                        putExtra("callerId", FirebaseAuth.getInstance().currentUser?.uid ?: "")
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    context.startActivity(intent)
-                } catch (t: Throwable) {
-                    // ignore UI launch errors here, continue to listen for call updates
-                    t.printStackTrace()
-                }
+                Log.d("CallsController", "startCall() callId=$callId channelId=$channelId")
 
-                // listen for updates for this call (repo exposes listenToCall)
-                repo.listenToCall(callId) { callDoc -> callDoc?.let { handleCallUpdate(it) } }
+                val intent = Intent(context, InCallActivity::class.java).apply {
+                    putExtra("callId", callId)
+                    putExtra("callerId", FirebaseAuth.getInstance().currentUser?.uid ?: "")
+                    putExtra("channelId", channelId) // consistency
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+                Log.d("CallsController", "startCall(): launched InCallActivity")
+
+                repo.listenToCall(callId) { callDoc ->
+                    Log.d("CallsController", "listenToCall update=${callDoc?.status}")
+                    callDoc?.let { handleCallUpdate(it) }
+                }
 
                 startRingTimeout(callId)
                 onCreated(callId)
             } catch (t: Throwable) {
+                Log.e("CallsController", "startCall failed: ${t.message}", t)
                 onError(t)
             }
         }
@@ -85,14 +84,15 @@ fun startCall(
 
     fun acceptCall(callId: String) {
         scope.launch {
-            val call = repo.getCall(callId) ?: return@launch
-            repo.updateCallStatus(callId, "accepted", startedAt = Timestamp.now())
+            Log.d("CallsController", "acceptCall() callId=$callId")
+            repo.updateCallStatus(callId, "in-progress", startedAt = Timestamp.now())
             cancelRingTimeout()
         }
     }
 
     fun rejectCall(callId: String) {
         scope.launch {
+            Log.d("CallsController", "rejectCall() callId=$callId")
             repo.updateCallStatus(callId, "rejected", endedAt = Timestamp.now(), endedReason = "rejected")
             cancelRingTimeout()
         }
@@ -100,6 +100,7 @@ fun startCall(
 
     fun endCall(callId: String) {
         scope.launch {
+            Log.d("CallsController", "endCall() callId=$callId")
             val call = repo.getCall(callId) ?: return@launch
             val endedAt = Timestamp.now()
             val duration = if (call.startedAt != null) (endedAt.seconds - call.startedAt.seconds) else 0L
@@ -108,76 +109,74 @@ fun startCall(
         }
     }
 
-    private fun finalizeCall(call: CallDoc) {
-        scope.launch {
-            try {
-                repo.writeUserCallLogsForEnd(call.callId, call)
-            } catch (e: Throwable) {
-                e.printStackTrace()
-            }
-        }
-    }
-
     private fun startRingTimeout(callId: String) {
+        Log.d("CallsController", "startRingTimeout() for callId=$callId")
         ringTimeoutJob?.cancel()
         ringTimeoutJob = scope.launch {
             delay(30_000)
             val call = repo.getCall(callId) ?: return@launch
             if (call.status == "ringing") {
+                Log.d("CallsController", "Ring timeout → marking missed")
                 repo.updateCallStatus(callId, "missed", endedAt = Timestamp.now(), endedReason = "timeout")
             }
         }
     }
 
     private fun cancelRingTimeout() {
+        Log.d("CallsController", "cancelRingTimeout()")
         ringTimeoutJob?.cancel()
         ringTimeoutJob = null
     }
 
-    private suspend fun requestAgoraToken(channelId: String): TokenResponse {
-        val idToken = auth.currentUser
-            ?.getIdToken(false)
-            ?.await()
-            ?.token ?: throw IllegalStateException("No idToken")
+    suspend fun requestAgoraToken(channelId: String, uid: Int = 0): TokenResponse =
+        withContext(Dispatchers.IO) {
+            Log.d("CallsController", "requestAgoraToken() channelId=$channelId uid=$uid")
+            val idToken = auth.currentUser?.getIdToken(true)?.await()?.token
+                ?: throw IllegalStateException("No idToken")
 
-        val url = AGORA_TOKEN_URL
-        val payload = mapOf("channelId" to channelId)
-        val moshi = Moshi.Builder().build()
-        val jsonPayload = moshi.adapter(Map::class.java).toJson(payload)
-        val body: RequestBody = jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaType())
-        val client = OkHttpClient()
+            val jsonPayload = """{"channelId":"$channelId","uidInt":$uid}"""
+            val body = jsonPayload.toRequestBody("application/json".toMediaType())
+            val client = OkHttpClient()
 
-        val request = Request.Builder()
-            .url(url)
-            .post(body)
-            .addHeader("Authorization", "Bearer $idToken")
-            .build()
+            val request = Request.Builder()
+                .url(AGORA_TOKEN_URL)
+                .post(body)
+                .addHeader("Authorization", "Bearer $idToken")
+                .addHeader("Content-Type", "application/json")
+                .build()
 
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw IllegalStateException("Token request failed: ${response.code}")
-            val responseBody = response.body?.string() ?: throw IllegalStateException("Empty token response")
-            val adapter = moshi.adapter(TokenResponse::class.java)
-            return adapter.fromJson(responseBody) ?: throw IllegalStateException("Invalid token response")
+            client.newCall(request).execute().use { response ->
+                val code = response.code
+                val responseBody = response.body?.string()
+                Log.d("AgoraToken", "HTTP $code | body=$responseBody")
+
+                if (!response.isSuccessful) throw IllegalStateException("Token request failed: $code $responseBody")
+                if (responseBody.isNullOrEmpty()) throw IllegalStateException("Empty token response")
+
+                val json = org.json.JSONObject(responseBody)
+                return@withContext TokenResponse(
+                    token = json.optString("token"),
+                    channelId = json.optString("channelId"),
+                    uid = json.optInt("uid", 0)
+                )
+            }
         }
-    }
 
     data class TokenResponse(val token: String?, val channelId: String?, val uid: Int?)
 
     fun clear() {
+        Log.d("CallsController", "clear()")
         stopIncomingWatcher()
         scope.cancel()
-        AgoraManager.destroy()
+        // Do NOT destroy the Agora engine here. InCallActivity needs it.
+        // AgoraManager.destroy() should be called on full app shutdown or logout.
     }
 
-    /**
-     * Start watching for incoming calls for the signed-in user.
-     * Listens for most recent call doc where calleeId == my uid and status == "ringing".
-     * Updates the incomingCall StateFlow so UI can react.
-     */
     fun startIncomingWatcher() {
         if (incomingWatcher != null) return
-
         val uid = auth.currentUser?.uid ?: return
+
+        Log.d("CallsController", "startIncomingWatcher() for uid=$uid")
 
         val q = db.collection("calls")
             .whereEqualTo("calleeId", uid)
@@ -187,54 +186,37 @@ fun startCall(
 
         incomingWatcher = q.addSnapshotListener { snap, err ->
             if (err != null) {
-                // best-effort: log, and keep state as-is
-                err.printStackTrace()
+                Log.e("CallsController", "Incoming watcher error: ${err.message}")
                 return@addSnapshotListener
             }
-
             if (snap == null || snap.isEmpty) {
+                Log.d("CallsController", "Incoming watcher: no ringing calls")
                 _incomingCall.value = null
                 return@addSnapshotListener
             }
-
             val doc = snap.documents.firstOrNull()
-            val call = doc?.toObject(CallDoc::class.java)
-            _incomingCall.value = call
+            Log.d("CallsController", "Incoming watcher got new call=$doc")
+            _incomingCall.value = doc?.toObject(CallDoc::class.java)
         }
     }
 
-    /** Stop the incoming watcher and clear incoming call state */
     fun stopIncomingWatcher() {
+        Log.d("CallsController", "stopIncomingWatcher()")
         incomingWatcher?.remove()
         incomingWatcher = null
         _incomingCall.value = null
     }
-    private fun handleCallUpdate(call: CallDoc) {
-        when (call.status) {
-            "accepted", "in-progress" -> {
-                // Join the Agora channel if not already joined
-                call.channelId?.let { channel ->
-                    scope.launch {
-                        try {
-                            val tokenResponse = requestAgoraToken(channel)
-                            val token = tokenResponse.token ?: return@launch
-                            val uid = tokenResponse.uid ?: 0
-                            AgoraManager.joinChannel(token, channel, uid)
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                        }
-                    }
-                }
-            }
 
+    private fun handleCallUpdate(call: CallDoc) {
+        Log.d("CallsController", "handleCallUpdate() status=${call.status}")
+        when (call.status) {
+            // Joining is handled by InCallActivity to avoid double joins and UI races.
             "rejected", "missed", "ended" -> {
-                // Leave Agora channel and finalize call
+                Log.d("CallsController", "Call ended reason=${call.endedReason}")
                 AgoraManager.leaveChannel()
-                finalizeCall(call)
                 currentCallId = null
                 cancelRingTimeout()
             }
         }
     }
-
 }

@@ -173,5 +173,16 @@ class ChatActivity : ComponentActivity() {
         val chatId = intent.getStringExtra("chatId") ?: return
         val me = FirebaseAuth.getInstance().currentUser?.uid ?: return
         HomePController.markLastMessageRead(chatId, me)
+        com.example.cnnct.notifications.ForegroundTracker.setCurrentChat(chatId)
+
+        // cancel any existing notification for this chat and clear local history
+        val id = (chatId ?: "").hashCode()
+        androidx.core.app.NotificationManagerCompat.from(this).cancel(id)
+        com.example.cnnct.notifications.NotificationsStore.clearHistory(this, chatId ?: "")
+    }
+
+    override fun onPause() {
+        super.onPause()
+        com.example.cnnct.notifications.ForegroundTracker.setCurrentChat(null)
     }
 }

@@ -1,85 +1,177 @@
-// file: PushService.kt
+// app/src/main/java/com/example/cnnct/calls/PushService.kt
 package com.example.cnnct.calls
 
-import android.app.*
-import android.content.Context
+import android.Manifest
+import android.app.PendingIntent
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.Color
-import android.os.Build
+import androidx.annotation.RequiresPermission
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.Person
+import coil.ImageLoader
+import coil.request.ImageRequest
+import coil.size.Size
+import com.example.cnnct.R
+import com.example.cnnct.chat.view.ChatActivity
+import com.example.cnnct.notifications.ForegroundTracker
+import com.example.cnnct.notifications.NotificationHelper
+import com.example.cnnct.notifications.NotificationsStore
+import com.example.cnnct.notifications.TokenRegistrar
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
-import com.example.cnnct.R
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class PushService : FirebaseMessagingService() {
-    companion object {
-        const val CHANNEL_ID = "calls_channel"
-        const val NOTIF_ID = 1001
+
+    override fun onNewToken(token: String) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try { TokenRegistrar.upsertToken(applicationContext, token) } catch (_: Exception) {}
+        }
     }
 
-    override fun onMessageReceived(message: RemoteMessage) {
-        super.onMessageReceived(message)
+    @RequiresPermission(Manifest.permission.POST_NOTIFICATIONS)
+    override fun onMessageReceived(remoteMessage: RemoteMessage) {
+        NotificationHelper.ensureChannels(this)
 
-        // Expect data payload: callId, callerId, channelId
-        val data = message.data
-        val callId = data["callId"] ?: return
-        val callerId = data["callerId"] ?: "Unknown"
-        val channelId = data["channelId"] ?: ""
+        val data = remoteMessage.data
+        val type = data["type"] ?: return
+        val user = FirebaseAuth.getInstance().currentUser ?: return
 
-        createChannelIfNeeded()
+        when (type) {
 
-        // Full-screen intent to open IncomingCallActivity
-        val incoming = Intent(this, IncomingCallActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra("callId", callId)
-            putExtra("callerId", callerId)
-            putExtra("channelId", channelId)
-        }
-        val fullScreenPending = PendingIntent.getActivity(
-            this,
-            callId.hashCode(),
-            incoming,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE else PendingIntent.FLAG_UPDATE_CURRENT
-        )
+            // ----------------------------- MESSAGES -----------------------------
+            "message" -> {
+                val chatId = data["chatId"] ?: return
+                val senderName = data["senderName"] ?: "New message"
+                val text = data["text"] ?: ""
+                val senderPhotoUrl = data["senderPhotoUrl"] // may be null
 
-        // Accept / Reject actions as broadcast intents
-        val acceptIntent = Intent(this, CallActionReceiver::class.java).apply {
-            action = "ACTION_ACCEPT_CALL"
-            putExtra("callId", callId)
-        }
-        val rejectIntent = Intent(this, CallActionReceiver::class.java).apply {
-            action = "ACTION_REJECT_CALL"
-            putExtra("callId", callId)
-        }
-        val acceptPending = PendingIntent.getBroadcast(this, callId.hashCode() + 1, acceptIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val rejectPending = PendingIntent.getBroadcast(this, callId.hashCode() + 2, rejectIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                // Suppress if chat is foreground
+                if (ForegroundTracker.getCurrentChat() == chatId) return
 
-        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_call) // your icon
-            .setContentTitle("Incoming call")
-            .setContentText("Call from $callerId")
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setCategory(NotificationCompat.CATEGORY_CALL)
-            .setAutoCancel(true)
-            .setFullScreenIntent(fullScreenPending, true)
-            .addAction(NotificationCompat.Action(0, "Reject", rejectPending))
-            .addAction(NotificationCompat.Action(0, "Accept", acceptPending))
-            .setOngoing(true)
-            .setColor(Color.WHITE)
+                // Append + build history
+                val now = System.currentTimeMillis()
+                NotificationsStore.appendMessage(this, chatId, senderName, text, now)
+                val history = NotificationsStore.history(this, chatId)
 
-        val notifManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notifManager.notify(NOTIF_ID + (callId.hashCode() and 0xffff), builder.build())
-    }
+                val open = PendingIntent.getActivity(
+                    this, chatId.hashCode(),
+                    Intent(this, ChatActivity::class.java)
+                        .putExtra("chatId", chatId)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
 
-    private fun createChannelIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val nm = getSystemService(NotificationManager::class.java)
-            val chan = NotificationChannel(CHANNEL_ID, "Calls", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "Incoming call notifications"
-                setSound(null, null)
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                // Build MessagingStyle without using RestrictedApi setters
+                val me = Person.Builder()
+                    .setName(user.displayName ?: user.email ?: "Me")
+                    .build()
+
+                val style = NotificationCompat.MessagingStyle(me)
+                for (m in history) {
+                    val sender = Person.Builder().setName(m.sender).build()
+                    val msg = NotificationCompat.MessagingStyle.Message(m.text, m.ts, sender)
+                    style.addMessage(msg)
+                }
+
+                val builder = NotificationHelper
+                    .builder(this, NotificationHelper.CHANNEL_MESSAGES)
+                    .setSmallIcon(R.drawable.ic_message)
+                    .setContentTitle(senderName) // title here instead of conversationTitle
+                    .setStyle(style)
+                    .setContentIntent(open)
+                    .setAutoCancel(true)
+                    .setOnlyAlertOnce(true)
+                    .setGroup("chat_$chatId")
+
+                if (!senderPhotoUrl.isNullOrBlank()) {
+                    CoroutineScope(Dispatchers.IO).launch {
+                        try { loadBitmap(senderPhotoUrl)?.let { builder.setLargeIcon(it) } } catch (_: Exception) {}
+                        NotificationManagerCompat.from(this@PushService).notify(chatId.hashCode(), builder.build())
+                    }
+                } else {
+                    NotificationManagerCompat.from(this).notify(chatId.hashCode(), builder.build())
+                }
             }
-            nm.createNotificationChannel(chan)
+
+            // ----------------------------- CALLS -----------------------------
+            "incoming_call" -> {
+                val callId = data["callId"] ?: return
+                val callerId = data["callerId"] ?: return
+                val callerName = data["callerDisplayName"] ?: "Incoming call"
+
+                val full = PendingIntent.getActivity(
+                    this, callId.hashCode(),
+                    Intent(this, IncomingCallActivity::class.java)
+                        .putExtra("callId", callId)
+                        .putExtra("callerId", callerId)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+
+                // Activity-based intents for actions to avoid BroadcastReceiver launch issues
+                val accept = PendingIntent.getActivity(
+                    this, ("acc_$callId").hashCode(),
+                    Intent(this, CallActionActivity::class.java)
+                        .putExtra(CallActionActivity.EXTRA_ACTION, CallActionActivity.ACTION_ACCEPT)
+                        .putExtra(CallActionActivity.EXTRA_CALL_ID, callId)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+
+                val decline = PendingIntent.getActivity(
+                    this, ("dec_$callId").hashCode(),
+                    Intent(this, CallActionActivity::class.java)
+                        .putExtra(CallActionActivity.EXTRA_ACTION, CallActionActivity.ACTION_DECLINE)
+                        .putExtra(CallActionActivity.EXTRA_CALL_ID, callId)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+
+                val notif = NotificationCompat.Builder(this, NotificationHelper.CHANNEL_CALLS)
+                    .setSmallIcon(R.drawable.ic_call)
+                    .setColor(Color.parseColor("#10B981"))
+                    .setContentTitle("Incoming call")
+                    .setContentText("from $callerName")
+                    .setCategory(NotificationCompat.CATEGORY_CALL)
+                    .setPriority(NotificationCompat.PRIORITY_MAX)
+                    .setFullScreenIntent(full, true)
+                    .setOngoing(true)
+                    .setAutoCancel(false)
+                    .addAction(R.drawable.ic_call_end, "Decline", decline)
+                    .addAction(R.drawable.ic_call, "Accept", accept)
+                    .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                    .build()
+
+                NotificationManagerCompat.from(this).notify(CALL_NOTIF_ID, notif)
+            }
+
+            // Auto-cancel ring when status changes elsewhere
+            "call_update" -> {
+                val status = data["status"] ?: return
+                if (status != "ringing") {
+                    NotificationManagerCompat.from(this).cancel(CALL_NOTIF_ID)
+                }
+            }
         }
+    }
+
+    private suspend fun loadBitmap(url: String): Bitmap? {
+        val loader = ImageLoader(this)
+        val request = ImageRequest.Builder(this)
+            .data(url)
+            .size(Size.ORIGINAL)
+            .allowHardware(false)
+            .build()
+        return (loader.execute(request).drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
+    }
+
+    companion object {
+        const val CALL_NOTIF_ID = 9981
     }
 }

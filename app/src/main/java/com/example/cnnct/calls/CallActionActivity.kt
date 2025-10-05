@@ -1,27 +1,37 @@
-// app/src/main/java/com/example/cnnct/calls/CallActionReceiver.kt
 package com.example.cnnct.calls
 
-import android.content.BroadcastReceiver
-import android.content.Context
+import android.app.Activity
 import android.content.Intent
+import android.os.Bundle
 import android.util.Log
-import androidx.core.app.NotificationManagerCompat
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
-class CallActionReceiver : BroadcastReceiver() {
+/**
+ * Transparent one-shot activity launched from notification actions.
+ * Writes the Firestore change, then routes, then finishes.
+ */
+class CallActionActivity : Activity() {
 
-    private val scope = CoroutineScope(Dispatchers.IO)
+    private val ioScope = CoroutineScope(Dispatchers.IO + Job())
 
-    override fun onReceive(context: Context, intent: Intent) {
-        val action = intent.action ?: return
-        val callId = intent.getStringExtra("callId") ?: return
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
 
-        scope.launch {
+        val action = intent.getStringExtra(EXTRA_ACTION)
+        val callId = intent.getStringExtra(EXTRA_CALL_ID)
+
+        if (action == null || callId == null) {
+            finish()
+            return
+        }
+
+        ioScope.launch {
             try {
                 val calls = FirebaseFirestore.getInstance().collection("calls").document(callId)
                 when (action) {
@@ -34,11 +44,11 @@ class CallActionReceiver : BroadcastReceiver() {
                             )
                         ).await()
 
-                        // Launch InCallActivity from a receiver
-                        val i = Intent(context, InCallActivity::class.java)
+                        // Launch the in-call UI on the acceptor device
+                        val i = Intent(this@CallActionActivity, InCallActivity::class.java)
                             .putExtra("callId", callId)
                             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                        context.startActivity(i)
+                        startActivity(i)
                     }
                     ACTION_DECLINE -> {
                         calls.update(
@@ -49,18 +59,22 @@ class CallActionReceiver : BroadcastReceiver() {
                                 "updatedAt" to Timestamp.now()
                             )
                         ).await()
+                        // No UI on decline
                     }
                 }
             } catch (e: Exception) {
-                Log.e("CallActionReceiver", "Failed to update call: ${e.message}")
+                Log.e("CallActionActivity", "Call action failed: ${e.message}")
             } finally {
-                NotificationManagerCompat.from(context).cancel(PushService.CALL_NOTIF_ID)
+                // Close immediately
+                finish()
             }
         }
     }
 
     companion object {
-        const val ACTION_ACCEPT = "com.example.cnnct.calls.ACCEPT"
-        const val ACTION_DECLINE = "com.example.cnnct.calls.DECLINE"
+        const val ACTION_ACCEPT = "accept"
+        const val ACTION_DECLINE = "decline"
+        const val EXTRA_ACTION = "action"
+        const val EXTRA_CALL_ID = "callId"
     }
 }

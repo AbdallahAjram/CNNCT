@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- You don't need WRITE_EXTERNAL_STORAGE for the Photo Picker, but keeping your original line.
+         Note: maxSdkVersion=28 means it won't be requested on newer devices anyway. -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" android:required="false"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
+
+    <application
+        android:name=".App"
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@drawable/logo"
+        android:label="@string/app_name"
+        android:roundIcon="@drawable/logo"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.CNNCT"
+        tools:targetApi="31">
+
+        <!-- FileProvider for sharing temporary files (e.g., if you ever need it) -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+        <service
+            android:name=".calls.PushService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT"/>
+            </intent-filter>
+        </service>
+        <activity
+            android:name=".calls.CallActionActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Transparent" />
+
+        <!-- Splash/MainActivity: it extends AppCompatActivity, so give it an AppCompat theme.
+             This fixes: "You need to use a Theme.AppCompat theme (or descendant) with this activity." -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".homepage.view.HomeActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".auth.controller.LoginActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".auth.controller.SignupActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".auth.controller.CompleteProfileActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".groups.view.GroupActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".chat.view.ChatActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".settings.view.SettingsActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".calls.view.CallsActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".settings.view.AccountActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".notifications.view.NotificationSettingsActivity"
+            android:exported="false"/>
+
+        <!-- CanHub Cropper: MUST have an ActionBar to display Back/Done.
+             Use a built-in DarkActionBar theme so buttons appear immediately. -->
+        <activity
+            android:name="com.canhub.cropper.CropImageActivity"
+            android:theme="@style/Theme.MaterialComponents.DayNight.DarkActionBar"
+            tools:replace="android:theme" />
+
+        <activity
+            android:name=".calls.IncomingCallActivity"
+            android:exported="true"
+            android:immersive="true"
+            android:showOnLockScreen="true"
+            android:turnScreenOn="true"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
+        <activity android:name=".calls.InCallActivity"
+                  android:exported="false"
+            android:launchMode="singleTop"/>
+
+    </application>
+</manifest>

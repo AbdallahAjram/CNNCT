@@ -1,0 +1,9 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Base application theme. -->
+    <style name="Theme.CNNCT" parent="Theme.Material3.DayNight">
+        <!-- Customize colors only if needed -->
+    </style>
+
+
+</resources>

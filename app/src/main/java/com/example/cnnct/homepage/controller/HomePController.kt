@@ -265,4 +265,42 @@ object HomePController {
             }
         }
     }
+
+    fun createOrOpenPrivate(
+        me: String,
+        other: String,
+        onResult: (String?) -> Unit
+    ) {
+        val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+        val a = me
+        val b = other
+        val pairKey = if (a < b) "$a#$b" else "$b#$a"
+        val chatId = "priv_$pairKey"
+        val ref = db.collection("chats").document(chatId)
+
+        ref.get()
+            .addOnSuccessListener { snap ->
+                if (snap.exists()) {
+                    onResult(chatId)
+                } else {
+                    val data = mapOf(
+                        "type" to "private",
+                        "members" to listOf(a, b),
+                        "pairKey" to pairKey,
+                        "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                        "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                    )
+                    ref.set(data)
+                        .addOnSuccessListener { onResult(chatId) }
+                        .addOnFailureListener { e ->
+                            android.util.Log.e("HomePController", "create chat failed", e)
+                            onResult(null)
+                        }
+                }
+            }
+            .addOnFailureListener { e ->
+                android.util.Log.e("HomePController", "get chat failed", e)
+                onResult(null)
+            }
+    }
 }

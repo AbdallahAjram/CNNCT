@@ -270,13 +270,28 @@ fun HomeScreen(callsController: CallsController, onLogout: () -> Unit) {
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
-                                        HomePController.createOrGetPrivateChat(uid) { chatId ->
+                                        // Log exact pairKey for debugging
+                                        val me = FirebaseAuth.getInstance().currentUser!!.uid
+                                        val other = uid
+                                        val key = if (me < other) "$me#$other" else "$other#$me"
+                                        Log.e("DEBUG_PAIRKEY", "me=$me other=$other pairKey=$key")
+
+                                        // Deterministic create-or-open (no compound query)
+                                        HomePController.createOrOpenPrivate(
+                                            me = me,
+                                            other = uid
+                                        ) { chatId ->
                                             if (chatId != null) {
                                                 showUserPicker = false
                                                 searchQuery = ""
                                                 val intent = Intent(context, ChatActivity::class.java)
                                                     .putExtra("chatId", chatId)
                                                 context.startActivity(intent)
+                                            } else {
+                                                android.widget.Toast
+                                                    .makeText(context, "Couldn’t start chat (permissions/index).", android.widget.Toast.LENGTH_SHORT)
+                                                    .show()
+                                                Log.e("StartChat", "createOrOpenPrivate returned null")
                                             }
                                         }
                                     }

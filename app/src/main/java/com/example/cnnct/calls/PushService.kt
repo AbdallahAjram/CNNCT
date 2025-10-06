@@ -1,4 +1,3 @@
-// app/src/main/java/com/example/cnnct/calls/PushService.kt
 package com.example.cnnct.calls
 
 import android.Manifest
@@ -19,6 +18,7 @@ import com.example.cnnct.notifications.ForegroundTracker
 import com.example.cnnct.notifications.NotificationHelper
 import com.example.cnnct.notifications.NotificationsStore
 import com.example.cnnct.notifications.TokenRegistrar
+import com.example.cnnct.notifications.SettingsCache            // ✅ added
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
@@ -42,10 +42,16 @@ class PushService : FirebaseMessagingService() {
         val type = data["type"] ?: return
         val user = FirebaseAuth.getInstance().currentUser ?: return
 
+        // ✅ Read cached prefs instantly (no network in FCM threads)
+        val prefs = SettingsCache.load(this)
+        if (!prefs.notificationsEnabled) return  // Global OFF → bail early
+
         when (type) {
 
             // ----------------------------- MESSAGES -----------------------------
             "message" -> {
+                if (!prefs.chatNotificationsEnabled) return   // ✅ per-channel gate
+
                 val chatId = data["chatId"] ?: return
                 val senderName = data["senderName"] ?: "New message"
                 val text = data["text"] ?: ""
@@ -101,6 +107,8 @@ class PushService : FirebaseMessagingService() {
 
             // ----------------------------- CALLS -----------------------------
             "incoming_call" -> {
+                if (!prefs.callNotificationsEnabled) return   // ✅ per-channel gate
+
                 val callId = data["callId"] ?: return
                 val callerId = data["callerId"] ?: return
                 val callerName = data["callerDisplayName"] ?: "Incoming call"

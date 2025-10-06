@@ -21,4 +21,10 @@ class SettingsDataController(
     suspend fun unmuteChat(chatId: String) = repo.unmuteChat(chatId)
 
     suspend fun setMutedChats(ids: List<String>) = repo.setMutedChats(ids)
+    suspend fun setChatNotificationsEnabled(enabled: Boolean) =
+        repo.setChatNotificationsEnabled(enabled)
+
+    suspend fun setCallNotificationsEnabled(enabled: Boolean) =
+        repo.setCallNotificationsEnabled(enabled)
+
 }

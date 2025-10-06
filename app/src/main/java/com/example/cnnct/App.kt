@@ -58,7 +58,28 @@ class App : Application(), LifecycleEventObserver {
             }
         }
         auth.addAuthStateListener(authListener!!)
+
+        // ✅ NEW: Preload notification prefs into local cache once at startup
+        appScope.launch {
+            try {
+                val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return@launch
+                val snap = Firebase.firestore.collection("users").document(uid).get().await()
+                val notificationsEnabled = snap.getBoolean("notificationsEnabled") ?: true
+                val chatEnabled = snap.getBoolean("chatNotificationsEnabled") ?: true
+                val callEnabled = snap.getBoolean("callNotificationsEnabled") ?: true
+
+                com.example.cnnct.notifications.SettingsCache.save(
+                    this@App,
+                    com.example.cnnct.notifications.NotifPrefs(
+                        notificationsEnabled = notificationsEnabled,
+                        chatNotificationsEnabled = chatEnabled,
+                        callNotificationsEnabled = callEnabled
+                    )
+                )
+            } catch (_: Exception) { /* ignore – best effort */ }
+        }
     }
+
 
     override fun onTerminate() {
         super.onTerminate()

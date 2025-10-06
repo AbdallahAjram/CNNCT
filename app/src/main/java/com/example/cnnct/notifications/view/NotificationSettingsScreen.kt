@@ -13,14 +13,18 @@ import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.example.cnnct.notifications.NotifPrefs
+import com.example.cnnct.notifications.SettingsCache
 import com.example.cnnct.notifications.controller.NotificationSettingsViewModel
 import com.example.cnnct.notifications.model.NotificationSettings
 
@@ -30,6 +34,19 @@ import com.example.cnnct.notifications.model.NotificationSettings
 @Composable
 fun NotificationSettingsScreenHost(vm: NotificationSettingsViewModel) {
     val state by vm.state.collectAsState()
+
+    // ✅ Keep local cache in sync immediately when toggles change
+    val ctx = LocalContext.current
+    LaunchedEffect(state) {
+        SettingsCache.save(
+            ctx,
+            NotifPrefs(
+                notificationsEnabled = state.notificationsEnabled,
+                chatNotificationsEnabled = state.chatNotificationsEnabled,
+                callNotificationsEnabled = state.callNotificationsEnabled
+            )
+        )
+    }
 
     NotificationSettingsScreen(
         state = state,

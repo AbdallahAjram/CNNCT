@@ -112,5 +112,6 @@ object AgoraManager {
         }
     }
 
+    //test
     fun isJoined(): Boolean = joined
 }

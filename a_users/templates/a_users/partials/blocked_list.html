@@ -1,0 +1,16 @@
+{% if blocked_users %}
+<ul class="divide-y divide-gray-200">
+  {% for bu in blocked_users %}
+  <li class="py-2 flex items-center justify-between">
+    <div class="text-sm">
+      <div class="text-gray-900">@{{ bu.blocked.username }}</div>
+      <div class="text-gray-500">{{ bu.blocked.profile.phone|default:'No phone' }}</div>
+    </div>
+    <a href="{% url 'profile-unblock-user' bu.blocked.username %}" class="px-3 py-1.5 rounded-md bg-gray-800 text-gray-200 hover:bg-gray-700 text-sm">Unblock</a>
+  </li>
+  {% endfor %}
+{% else %}
+  <div class="text-sm text-gray-500">You have not blocked anyone.</div>
+{% endif %}
+
+

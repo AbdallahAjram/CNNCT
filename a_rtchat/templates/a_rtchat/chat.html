@@ -1,0 +1,429 @@
+{% extends 'layouts/blank.html' %}
+{% block content %}
+<div class="w-full" style="height:calc(100vh - 56px)">
+    <div class="flex h-full">
+        {% include 'a_rtchat/partials/chat_sidebar.html' %}
+        <div class="flex-1 min-w-0 flex flex-col">
+            <div class="flex items-center justify-between bg-gray-900 border-b border-gray-800 px-4 h-14">
+                <div class="flex items-center gap-3 min-w-0">
+                    {% if other_user %}
+                        <img class="w-9 h-9 rounded-full object-cover" src='{{other_user.profile.avatar}}'/>
+                        <div class="truncate">
+                            <div class="text-gray-100 font-semibold truncate flex items-center gap-2">
+                                <span id="header-online-dot" class="inline-block w-2.5 h-2.5 rounded-full {% if other_user_online %}bg-emerald-500{% else %}bg-gray-500{% endif %}"></span>
+                                <span class="truncate">{{ other_user.profile.name }}</span>
+                            </div>
+                            <div class="text-gray-400 text-xs truncate">@{{ other_user.username }}</div>
+                            {% if other_user.profile.phone %}
+                            <div class="text-gray-500 text-xs truncate">{{ other_user.profile.phone }}</div>
+                            {% endif %}
+                        </div>
+                    {% elif chat_group and chat_group.groupchat_name %}
+                        <div class="truncate">
+                            <div class="text-gray-100 font-semibold truncate">{{ chat_group.groupchat_name }}</div>
+                            <div class="text-gray-400 text-xs truncate">Group chat</div>
+                        </div>
+                    {% else %}
+                        <div class="truncate"></div>
+                    {% endif %}
+                </div>
+                <div class="flex items-center gap-2">
+                    <!-- Selection toolbar -->
+                    <div id="selection-toolbar" class="hidden items-center gap-2 mr-2">
+                        <form id="bulk-delete-form" method="post" action="{% url 'messages-delete-bulk' %}" hx-post="{% url 'messages-delete-bulk' %}" hx-swap="none" class="hidden"></form>
+                        <button id="selection-delete" type="button" class="px-3 py-1.5 rounded-md bg-red-600 text-white text-sm hover:bg-red-500">Delete</button>
+                        <button id="selection-clear" type="button" class="px-3 py-1.5 rounded-md bg-gray-800 text-gray-200 text-sm hover:bg-gray-700">Deselect</button>
+                    </div>
+                    {% if chat_group and user == chat_group.admin and chat_group.groupchat_name %}
+                    <a href="{% url 'edit-chatroom' chat_group.group_name %}" class="px-3 py-1.5 rounded-md bg-indigo-600 text-white text-sm hover:bg-indigo-500">Edit</a>
+                    {% endif %}
+                    {% if other_user or chat_group and chat_group.groupchat_name %}
+                    <div class="relative">
+                        <button type="button" class="px-2 py-1.5 rounded-md text-gray-300 hover:text-white hover:bg-gray-800" onclick="toggleHeaderMenu()">
+                            <span class="sr-only">Open menu</span>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 10l5 5 5-5z"/></svg>
+                        </button>
+                        <div id="header-menu" class="hidden absolute right-0 mt-2 w-56 bg-gray-900 border border-gray-800 rounded-lg shadow-xl overflow-hidden z-10">
+                            <div class="py-1 text-sm text-gray-200">
+                                {% if other_user %}
+                                <a href="{% url 'profile' other_user.username %}" class="block px-3 py-2 hover:bg-gray-800">View profile</a>
+                                <form method="post" hx-post="{% url 'profile-block-user' other_user.username %}" hx-swap="none" class="block">
+                                    {% csrf_token %}
+                                    <button type="submit" class="w-full text-left px-3 py-2 text-red-400 hover:bg-gray-800 hover:text-red-300">Block</button>
+                                </form>
+                                {% endif %}
+                                <form method="post" action="{% url 'chatroom-leave' chat_group.group_name %}" class="block">
+                                    {% csrf_token %}
+                                    <button type="submit" class="w-full text-left px-3 py-2 text-red-400 hover:bg-gray-800 hover:text-red-300">Leave chatroom</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            <div id="chat_container" class="overflow-y-auto flex-1 min-h-0 bg-gray-950" style="overscroll-behavior: contain; scrollbar-gutter: stable both-edges;">
+                {% if chat_group %}
+                <ul id="chat_messages" class="flex flex-col justify-end min-h-full gap-2 p-4">
+                    {% for message in chat_messages %}
+                        {% include 'a_rtchat/chat_message.html' %}
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <div class="h-full w-full flex items-center justify-center">
+                    <div class="text-center px-6 py-8 text-gray-400">
+                        <div class="text-lg font-medium mb-2">No chat selected</div>
+                        <div class="text-sm">Choose a private or group chat from the sidebar.</div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+            {% if chat_group %}
+            <div class="border-t border-gray-800 bg-gray-900">
+                <div class="px-3 py-1.5">
+                    <form id="chat_message_form" method='POST' class="w-full" hx-ext="ws"
+                        ws-connect="/ws/chatroom/{{ chatroom_name }}"
+                        ws-send
+                        _="on htmx:wsAfterSend reset() me">
+                        {% csrf_token %}
+                        <div class="mx-auto w-full" style="max-width: 1000px">
+                            <div class="flex items-center gap-2">
+                                <div class="flex-1 min-w-0">
+                                    {{ form.body }}
+                                </div>
+                                <button type="submit" class="px-4 py-2 rounded-lg text-white font-semibold flex items-center gap-2" style="background: linear-gradient(90deg, #4f46e5 0%, #7c3aed 100%);">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3.4 5.2l16.6 6.6-16.6 6.6 4.2-6.6-4.2-6.6z" fill="currentColor"/></svg>
+                                    Send
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <!-- Edit modal (hidden by default) -->
+    <div id="edit-backdrop" class="hidden fixed inset-0 bg-black/60 z-40"></div>
+    <div id="edit-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="w-full max-w-xl bg-gray-900 border border-gray-800 rounded-2xl shadow-2xl">
+            <div class="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+                <div class="text-gray-100 font-semibold">Edit message</div>
+                <button type="button" id="edit-cancel-x" class="text-gray-400 hover:text-white">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M18.3 5.71L12 12.01l-6.29-6.3-1.41 1.42L10.59 13.4 4.3 19.7l1.41 1.41 6.29-6.29 6.29 6.29 1.41-1.41-6.29-6.3 6.29-6.29z"/></svg>
+                </button>
+            </div>
+            <form id="edit-form" method="post" hx-post="#" hx-swap="none" class="p-5 flex flex-col gap-4">
+                {% csrf_token %}
+                <input type="hidden" name="message_id" id="edit-message-id" value="" />
+                <div>
+                    <textarea id="edit-body" name="body" rows="8" maxlength="25000" class="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-600" placeholder="Edit your message..."></textarea>
+                    <div class="text-xs text-gray-400 mt-1">Max 25,000 characters</div>
+                </div>
+                <div class="flex items-center justify-end gap-2 pt-2">
+                    <button type="button" id="edit-cancel" class="px-4 py-2 rounded-lg bg-gray-800 text-gray-200 hover:bg-gray-700">Cancel</button>
+                    <button type="submit" class="px-4 py-2 rounded-lg text-white font-semibold" style="background: linear-gradient(90deg, #4f46e5 0%, #7c3aed 100%);">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- New Chat modal -->
+    <div id="newchat-backdrop" class="hidden fixed inset-0 bg-black/60 z-40"></div>
+    <div id="newchat-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="w-full max-w-xl bg-gray-900 border border-gray-800 rounded-2xl shadow-2xl">
+            <div class="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+                <div class="text-gray-100 font-semibold">Start a new chat</div>
+                <button type="button" onclick="closeNewChat()" class="text-gray-400 hover:text-white">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M18.3 5.71L12 12.01l-6.29-6.3-1.41 1.42L10.59 13.4 4.3 19.7l1.41 1.41 6.29-6.29 6.29 6.29 1.41-1.41-6.29-6.3 6.29-6.29z"/></svg>
+                </button>
+            </div>
+            <div class="p-5 flex flex-col gap-4">
+                <form id="newchat-form" hx-get="{% url 'chat-user-search' %}" hx-target="#newchat-results" hx-trigger="keyup changed delay:300ms from:#newchat-input" hx-swap="innerHTML">
+                    <label for="newchat-input" class="block text-sm text-gray-300 mb-1">Username or phone number</label>
+                    <input id="newchat-input" name="q" type="text" placeholder="Search by username or phone" class="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-600" autocomplete="off" />
+                </form>
+                <div id="newchat-results" class="max-h-80 overflow-y-auto">
+                    <div class="text-sm text-gray-400">Type to search for a user.</div>
+                </div>
+                <form id="newchat-start" method="post" action="{% url 'chat-start-new' %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="q" id="newchat-q" />
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block javascript %}
+<script>
+    const container = document.getElementById('chat_container');
+    let isEditing = false;
+    let selectedIds = new Set();
+    function scrollToBottom(){ if(!container) return; container.scrollTop = container.scrollHeight; }
+    function isNearBottom(offset=120){ if(!container) return true; const d=container.scrollHeight-container.scrollTop-container.clientHeight; return d<=offset; }
+    scrollToBottom();
+    document.body.addEventListener('htmx:oobAfterSwap', function(){ if(isNearBottom()) { scrollToBottom(); } });
+    document.body.addEventListener('htmx:wsAfterSend', function(){ scrollToBottom(); });
+    container && container.addEventListener('wheel', function(e){
+        const atTop = container.scrollTop === 0 && e.deltaY < 0;
+        const atBottom = Math.ceil(container.scrollTop + container.clientHeight) >= container.scrollHeight && e.deltaY > 0;
+        if (atTop || atBottom) { e.preventDefault(); }
+    }, { passive: false });
+    // Delegated handlers for message context menu and delete confirm
+    const chatMessagesEl = document.getElementById('chat_messages');
+    if (chatMessagesEl) {
+        chatMessagesEl.addEventListener('contextmenu', function(e){
+            const li = e.target.closest('li[data-own="1"][id^="message-"]');
+            if(!li) return;
+            e.preventDefault();
+            const messageId = li.getAttribute('data-message-id');
+            if(!messageId) return;
+            const menu = document.getElementById('msg-menu-' + messageId);
+            const conf = document.getElementById('msg-delconf-' + messageId);
+            if (conf) conf.classList.add('hidden');
+            if (menu){
+                // hide Edit option if more than one selected
+                const editBtn = menu.querySelector('[data-action="open-edit"]');
+                if (editBtn){ editBtn.classList.toggle('hidden', selectedIds.size > 1); }
+                menu.classList.remove('hidden');
+                const closer = (ev)=>{
+                    if(!menu.contains(ev.target)){
+                        menu.classList.add('hidden');
+                        document.removeEventListener('click', closer);
+                    }
+                };
+                setTimeout(()=>document.addEventListener('click', closer), 0);
+            }
+        });
+
+        chatMessagesEl.addEventListener('click', function(e){
+            const toggleSelectBtn = e.target.closest('[data-action="toggle-select"]');
+            if (toggleSelectBtn){
+                const li = toggleSelectBtn.closest('li[id^="message-"]');
+                if(!li) return;
+                const messageId = li.getAttribute('data-message-id');
+                if(!messageId) return;
+                const menu = document.getElementById('msg-menu-' + messageId);
+                if (menu) menu.classList.add('hidden');
+                if (selectedIds.has(messageId)){
+                    selectedIds.delete(messageId);
+                    li.classList.remove('ring-2','ring-indigo-500');
+                    li.querySelector('.bubble')?.classList.remove('outline','outline-2','outline-indigo-400/70');
+                } else {
+                    selectedIds.add(messageId);
+                    li.classList.add('ring-2','ring-indigo-500');
+                    li.querySelector('.bubble')?.classList.add('outline','outline-2','outline-indigo-400/70');
+                }
+                updateSelectionUI();
+                return;
+            }
+            const openEditBtn = e.target.closest('[data-action="open-edit"]');
+            if (openEditBtn){
+                const li = openEditBtn.closest('li[id^="message-"]');
+                if(!li) return;
+                const messageId = li.getAttribute('data-message-id');
+                if(!messageId) return;
+                // Block edit if selection has more than one or a different one
+                if (selectedIds.size > 1 || (selectedIds.size === 1 && !selectedIds.has(messageId))){
+                    return; // hide edit via menu state, but double guard here
+                }
+                const menu = document.getElementById('msg-menu-' + messageId);
+                if (menu) menu.classList.add('hidden');
+                // Populate and show modal
+                const bodySpan = li.querySelector('.whitespace-pre-wrap');
+                const currentText = bodySpan ? bodySpan.textContent : '';
+                const textarea = document.getElementById('edit-body');
+                const hiddenId = document.getElementById('edit-message-id');
+                const form = document.getElementById('edit-form');
+                const backdrop = document.getElementById('edit-backdrop');
+                const modal = document.getElementById('edit-modal');
+                // Disable main chat form to prevent accidental ws send
+                const chatForm = document.getElementById('chat_message_form');
+                if (chatForm){
+                    // backup and remove ws-send so WS extension can't fire
+                    chatForm.dataset.wsSendWasPresent = chatForm.hasAttribute('ws-send') ? '1' : '0';
+                    if (chatForm.hasAttribute('ws-send')) chatForm.removeAttribute('ws-send');
+                    // disable inputs
+                    chatForm.querySelectorAll('textarea, input, button').forEach(el=>{ el.setAttribute('disabled','disabled'); });
+                }
+                isEditing = true;
+                if (textarea) textarea.value = currentText;
+                if (hiddenId) hiddenId.value = messageId;
+                if (form) form.setAttribute('hx-post', `/chat/message/${messageId}/edit`);
+                if (backdrop) backdrop.classList.remove('hidden');
+                if (modal) modal.classList.remove('hidden');
+                setTimeout(()=>document.getElementById('edit-body')?.focus(), 0);
+                return;
+            }
+            const openBtn = e.target.closest('[data-action="open-delete"]');
+            if (openBtn){
+                const li = openBtn.closest('li[id^="message-"]');
+                if(!li) return;
+                const messageId = li.getAttribute('data-message-id');
+                if(!messageId) return;
+                const menu = document.getElementById('msg-menu-' + messageId);
+                const conf = document.getElementById('msg-delconf-' + messageId);
+                if (menu) menu.classList.add('hidden');
+                if (conf) conf.classList.remove('hidden');
+                return;
+            }
+            const closeBtn = e.target.closest('[data-action="close-delete"]');
+            if (closeBtn){
+                const li = closeBtn.closest('li[id^="message-"]');
+                if(!li) return;
+                const messageId = li.getAttribute('data-message-id');
+                if(!messageId) return;
+                const conf = document.getElementById('msg-delconf-' + messageId);
+                if (conf) conf.classList.add('hidden');
+            }
+        });
+    }
+    function updateSelectionUI(){
+        const bar = document.getElementById('selection-toolbar');
+        const delBtn = document.getElementById('selection-delete');
+        const clearBtn = document.getElementById('selection-clear');
+        const show = selectedIds.size > 0;
+        if (bar){ bar.classList.toggle('hidden', !show); }
+        // Hide Edit buttons in menus when selection > 1
+        document.querySelectorAll('[id^="msg-menu-"]').forEach(menu=>{
+            const editBtn = menu.querySelector('[data-action="open-edit"]');
+            if (editBtn){ editBtn.classList.toggle('hidden', selectedIds.size > 1); }
+        });
+    }
+    document.getElementById('selection-clear')?.addEventListener('click', function(){
+        // remove highlights
+        selectedIds.forEach(id=>{
+            const li = document.getElementById('message-' + id);
+            if (li){
+                li.classList.remove('ring-2','ring-indigo-500');
+                li.querySelector('.bubble')?.classList.remove('outline','outline-2','outline-indigo-400/70');
+            }
+        });
+        selectedIds = new Set();
+        updateSelectionUI();
+    });
+    document.getElementById('selection-delete')?.addEventListener('click', function(){
+        if (selectedIds.size === 0) return;
+        const ids = Array.from(selectedIds);
+        const form = document.getElementById('bulk-delete-form');
+        if (!form) return;
+        // clear existing
+        form.innerHTML = '';
+        const csrf = document.querySelector('input[name="csrfmiddlewaretoken"]')?.cloneNode(true);
+        if (csrf) form.appendChild(csrf);
+        ids.forEach(id=>{
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'ids[]';
+            input.value = id;
+            form.appendChild(input);
+        });
+        htmx.trigger(form, 'submit');
+        // Clear selection immediately; UI will update via OOB swaps
+        document.getElementById('selection-clear')?.click();
+    });
+    // Modal cancel handlers
+    function closeEditModal(){
+        const backdrop = document.getElementById('edit-backdrop');
+        const modal = document.getElementById('edit-modal');
+        if (backdrop) backdrop.classList.add('hidden');
+        if (modal) modal.classList.add('hidden');
+        // Re-enable main chat form
+        const chatForm = document.getElementById('chat_message_form');
+        if (chatForm){
+            // restore ws-send if it was present
+            if (chatForm.dataset.wsSendWasPresent === '1'){
+                chatForm.setAttribute('ws-send', '');
+            }
+            chatForm.querySelectorAll('textarea[disabled], input[disabled], button[disabled]').forEach(el=>{ el.removeAttribute('disabled'); });
+        }
+        isEditing = false;
+    }
+    document.getElementById('edit-cancel')?.addEventListener('click', closeEditModal);
+    document.getElementById('edit-cancel-x')?.addEventListener('click', closeEditModal);
+    document.getElementById('edit-backdrop')?.addEventListener('click', closeEditModal);
+    // Close modal after successful HTMX submit
+    document.body.addEventListener('htmx:afterRequest', function(ev){
+        const elt = ev.target;
+        if (!elt) return;
+        if (elt.id === 'edit-form'){
+            if (ev.detail && ev.detail.xhr && ev.detail.xhr.status >= 200 && ev.detail.xhr.status < 300){
+                closeEditModal();
+            } else {
+                const toast = document.createElement('div');
+                toast.textContent = 'Could not edit message.';
+                toast.className = 'fixed bottom-4 left-1/2 -translate-x-1/2 bg-red-600 text-white text-sm px-3 py-2 rounded shadow z-50';
+                document.body.appendChild(toast);
+                setTimeout(()=>toast.remove(), 2200);
+            }
+        } else if (elt.id === 'bulk-delete-form'){
+            if (!(ev.detail && ev.detail.xhr && ev.detail.xhr.status >= 200 && ev.detail.xhr.status < 300)){
+                const toast = document.createElement('div');
+                toast.textContent = 'Could not delete selected messages.';
+                toast.className = 'fixed bottom-4 left-1/2 -translate-x-1/2 bg-red-600 text-white text-sm px-3 py-2 rounded shadow z-50';
+                document.body.appendChild(toast);
+                setTimeout(()=>toast.remove(), 2200);
+            }
+        }
+    });
+    // Guard: prevent submit/send from main chat while editing
+    const chatTextarea = document.querySelector('#chat_message_form textarea');
+    if (chatTextarea){
+        chatTextarea.addEventListener('keydown', function(e){
+            if (!isEditing) return;
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey || !e.shiftKey)){
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        }, true);
+    }
+    // Also stop propagation of Enter from edit textarea to be safe
+    const editTextarea = document.getElementById('edit-body');
+    editTextarea?.addEventListener('keydown', function(e){
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)){
+            // allow ctrl/cmd+enter to submit edit form explicitly
+            return;
+        }
+        e.stopPropagation();
+    }, true);
+    function toggleHeaderMenu(){
+        const m = document.getElementById('header-menu');
+        if(!m) return;
+        const isHidden = m.classList.contains('hidden');
+        if(isHidden){
+            m.classList.remove('hidden');
+            const closer = (ev)=>{
+                if(!m.contains(ev.target)){
+                    m.classList.add('hidden');
+                    document.removeEventListener('click', closer);
+                }
+            };
+            setTimeout(()=>document.addEventListener('click', closer), 0);
+        }else{
+            m.classList.add('hidden');
+        }
+    }
+    function closeNewChat(){
+        document.getElementById('newchat-backdrop')?.classList.add('hidden');
+        document.getElementById('newchat-modal')?.classList.add('hidden');
+    }
+    // Delegate clicks on search results to start a chat
+    document.getElementById('newchat-results')?.addEventListener('click', function(e){
+        const li = e.target.closest('li[data-username]');
+        if(!li) return;
+        const username = li.getAttribute('data-username');
+        if(!username) return;
+        // Prefer server route that takes username path for speed
+        window.location.href = `/chat/${encodeURIComponent(username)}/`;
+    });
+    // Keep hidden q in sync for fallback POST
+    document.getElementById('newchat-input')?.addEventListener('input', function(e){
+        const v = e.target.value || '';
+        const hidden = document.getElementById('newchat-q');
+        if(hidden) hidden.value = v;
+    });
+</script>
+{% endblock %}

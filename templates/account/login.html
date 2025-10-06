@@ -1,0 +1,42 @@
+{% extends "account/base_entrance.html" %}
+{% load i18n %}
+{% load allauth account %}
+{% load static %}
+{% block head_title %}
+    {% trans "Login" %}
+{% endblock head_title %}
+{% block content %}
+<div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+    <div class="hidden md:flex items-center justify-center">
+        <img src="{% static 'images/logo.svg' %}" alt="Logo" class="max-w-[260px] w-full opacity-90" onerror="this.style.display='none'"/>
+    </div>
+    <div>
+        <h1 class="text-2xl font-semibold mb-2">{% trans "Sign in" %}</h1>
+        {% url 'account_login' as login_url %}
+        {% element form form=form method="post" action=login_url tags="entrance,login" %}
+            {% slot body %}
+                {% csrf_token %}
+                <div class="space-y-4">
+                    {% element fields form=form unlabeled=True %}{% endelement %}
+                    {% if redirect_field_value %}
+                        <input type="hidden" name="{{ redirect_field_name }}" value="{{ redirect_field_value }}" />
+                    {% endif %}
+                </div>
+            {% endslot %}
+            {% slot actions %}
+                {% element button type="submit" tags="prominent,login" %}
+                    {% trans "Sign In" %}
+                {% endelement %}
+            {% endslot %}
+        {% endelement %}
+        <p class="text-gray-500 text-sm mt-4">
+            {% trans "Account creation is only available in our mobile app. Please use the app to create a new account." %}
+        </p>
+        {% if SOCIALACCOUNT_ENABLED %}
+            <div class="mt-6">
+                {% include "socialaccount/snippets/login.html" with page_layout="entrance" %}
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock content %}

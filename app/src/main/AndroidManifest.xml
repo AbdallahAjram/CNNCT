@@ -103,6 +103,10 @@
             android:name=".settings.view.AccountActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".notifications.view.NotificationSettingsActivity"
+            android:exported="false"/>
+
         <!-- CanHub Cropper: MUST have an ActionBar to display Back/Done.
              Use a built-in DarkActionBar theme so buttons appear immediately. -->
         <activity

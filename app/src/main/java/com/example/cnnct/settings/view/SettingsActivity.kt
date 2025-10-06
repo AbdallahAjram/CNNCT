@@ -15,6 +15,7 @@ import com.example.cnnct.homepage.view.BottomNavigationBar
 import androidx.activity.compose.setContent
 import androidx.compose.material3.Scaffold
 import com.example.cnnct.homepage.view.BottomNavigationBar
+import com.example.cnnct.notifications.view.NotificationSettingsActivity
 import com.example.cnnct.settings.controller.SettingsController
 import com.example.cnnct.settings.controller.SettingsDataController
 import com.example.cnnct.settings.model.UserSettingsRepository
@@ -50,7 +51,12 @@ class SettingsActivity : ComponentActivity() {
                             }
                             "privacy" -> {/* TODO: navigate to Privacy */}
                             "themes" -> {/* TODO: navigate to Themes */}
-                            "notifications" -> {/* TODO: navigate to Notifications */}
+
+                            "notifications" -> {
+                                val intent = Intent(this, NotificationSettingsActivity::class.java)
+                                startActivity(intent)
+                            }
+
                             "blocked" -> {/* TODO: navigate to Blocked Accounts */}
                         }
                     }

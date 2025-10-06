@@ -2,75 +2,74 @@
 
 {% block content %}
 
-<h1 class="mb-8">Account Settings</h1>
+<h1 class="mb-6 text-2xl font-semibold">Account Settings</h1>
 
-<table class="w-full text-sm text-left text-gray-500">
-    <tbody>
-        <tr>
-            <th scope="row" class="pt-4 pb-1 text-base font-bold text-gray-900">
-                Email address
-            </th>
-            <td id="email-address" class="pt-4 pb-1 pl-4">
-                {% if user.email %}{{ user.email }}{% else %}No Email{% endif %}
-            </td>
-            <td class="pt-4 pb-1 pl-4">
-                <a id="email-edit" class="cursor-pointer font-medium text-blue-600 hover:underline"
-                    hx-get="{% url 'profile-emailchange' %}"
-                    hx-target="#email-address"
-                    hx-swap="innerHTML" >
-                    Edit
-                </a>
-            </td>
-        </tr>
+<div class="space-y-6">
+    <div class="p-4 rounded-xl border border-gray-200 bg-white">
+        <div class="flex items-center justify-between">
+            <div>
+                <div class="text-sm text-gray-500">Email address</div>
+                <div id="email-address" class="text-gray-900">
+                    {% if user.email %}{{ user.email }}{% else %}No Email{% endif %}
+                </div>
+                <div class="text-xs mt-1">
+                    {% if user.emailaddress_set.first.verified %}
+                        <span class="text-green-600">Verified</span>
+                    {% else %}
+                        <span class="text-amber-600">Not verified</span>
+                    {% endif %}
+                </div>
+            </div>
+            <a id="email-edit" class="px-3 py-1.5 rounded-md bg-gray-100 text-gray-800 hover:bg-gray-200 cursor-pointer"
+                hx-get="{% url 'profile-emailchange' %}"
+                hx-target="#email-address"
+                hx-swap="innerHTML">
+                Edit
+            </a>
+        </div>
+        {% if not user.emailaddress_set.first.verified %}
+        <div class="mt-3">
+            <a href="{% url 'profile-emailverify' %}" class="text-indigo-600 hover:text-indigo-500 text-sm">Verify email</a>
+        </div>
+        {% endif %}
+    </div>
 
-        <tr class="border-b">
-            <th scope="row" class="pb-4 font-medium text-gray-900">  
-            </th>
-            <td class="pb-4 pl-4">
-                {% if user.emailaddress_set.first.verified %}
-                <span class="text-green-500">Verified</span>{% else %}
-                <span class="text-amber-500">Not verified</span>
-                {% endif %}
-            </td>
-            <td class="pb-4 pl-4">
-                <a href="{% url 'profile-emailverify' %}" class="font-medium text-blue-600 hover:underline">
-                    {% if not user.emailaddress_set.first.verified %}Verify{% endif %}
-                </a>
-            </td>
-        </tr>
+    <div class="p-4 rounded-xl border border-gray-200 bg-white">
+        <div class="flex items-center justify-between">
+            <div>
+                <div class="text-sm text-gray-500">Username</div>
+                <div id="username" class="text-gray-900">{{ user.username }}</div>
+            </div>
+            <a id="username-edit" class="px-3 py-1.5 rounded-md bg-gray-100 text-gray-800 hover:bg-gray-200 cursor-pointer"
+                hx-get="{% url 'profile-usernamechange' %}"
+                hx-target="#username"
+                hx-swap="innerHTML">
+                Edit
+            </a>
+        </div>
+    </div>
 
-        <tr class="border-b">
-            <th scope="row" class="py-4 text-base font-bold text-gray-900">
-                Username
-            </th>
-            <td id="username" class="py-4 pl-4">
-                {{ user.username }}
-            </td>
-            <td class="py-4 pl-4">
-                <a id="username-edit" class="cursor-pointer font-medium text-blue-600 hover:underline"
-                    hx-get="{% url 'profile-usernamechange' %}"
-                    hx-target="#username"
-                    hx-swap="innerHTML" >
-                    Edit
-                </a>
-            </td>
-        </tr>
+    <div class="p-4 rounded-xl border border-gray-200 bg-white">
+        <div class="flex items-center justify-between mb-3">
+            <div>
+                <div class="text-sm text-gray-500">Blocked Users</div>
+                <div class="text-gray-800 text-sm">Manage users you have blocked</div>
+            </div>
+        </div>
+        <div id="blocked-list">
+            {% include 'a_users/partials/blocked_list.html' %}
+        </div>
+    </div>
 
-        <tr class="">
-            <th scope="row" class="py-4 text-base font-bold text-gray-900">
-                Delete Account
-            </th>
-            <td class="py-4 pl-4">
-                Once deleted, account is gone. Forever.
-            </td>
-            <td class="py-4 pl-4">
-                <a href="{% url 'profile-delete' %}" class="font-medium text-red-600 hover:underline">
-                    Delete
-                </a>
-            </td>
-        </tr>
-    </tbody>
-</table>
-
+    <div class="p-4 rounded-xl border border-red-200 bg-red-50">
+        <div class="flex items-center justify-between">
+            <div>
+                <div class="text-sm text-red-700">Delete Account</div>
+                <div class="text-red-800 text-sm">Once deleted, account is gone. Forever.</div>
+            </div>
+            <a href="{% url 'profile-delete' %}" class="px-3 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-500">Delete</a>
+        </div>
+    </div>
+</div>
 
 {% endblock %}

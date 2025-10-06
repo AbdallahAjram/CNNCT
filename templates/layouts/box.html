@@ -1,12 +1,12 @@
-{% extends 'base.html' %}
+    {% extends 'base.html' %}
 
-{% block layout %}
-<content class="block max-w-3xl mx-auto md:p-12">
-    <div class="bg-white rounded-2xl md:drop-shadow-2xl shadow-black w-full p-8">
+    {% block layout %}
+    <content class="block max-w-3xl mx-auto md:p-12">
+        <div class="rounded-2xl w-full p-8 text-gray-100 bg-gradient-to-br from-indigo-950 to-slate-900 ring-1 ring-indigo-900/40">
 
-    {% block content %} 
+        {% block content %} 
+        {% endblock %}
+
+        </div>
+    </content>
     {% endblock %}
-
-    </div>
-</content>
-{% endblock %}

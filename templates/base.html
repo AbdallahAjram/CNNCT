@@ -7,16 +7,30 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Django Template">
-    <title>Project Title</title>
-    <link rel="icon" type="image/x-icon" href="{% static 'favicon.ico' %}">
+    <title>Cnnct</title>
+    <link rel="icon" type="image/png" href="/media/avatars/cnnct-high-resolution-logo__1_-removebg-preview.png">
+    <link rel="alternate icon" type="image/x-icon" href="{% static 'favicon.ico' %}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
-    <script src="https://unpkg.com/htmx.org@2.0.2"></script>
-    {% django_htmx_script %}
-    <script src="https://unpkg.com/hyperscript.org@0.9.12"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              indigo: { 600: '#6366f1', 700: '#4f46e5', 950: '#1e1b4b' },
+              fuchsia: { 600: '#c026d3' },
+              slate: { 900: '#0b1220' }
+            }
+          }
+        }
+      }
+    </script>
     <script src="https://unpkg.com/hyperscript.org@0.9.14"></script>
-     <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.6/dist/htmx.min.js" integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/htmx-ext-ws@2.0.2" integrity="sha384-vuKxTKv5TX/b3lLzDKP2U363sOAoRo5wSvzzc3LJsbaQRSBSS+3rKKHcOx5J8doU" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.6/dist/htmx.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/htmx-ext-ws@2.0.2/ws.js"></script>
 </head>
     <style>
   [x-cloak] { 
@@ -48,7 +62,7 @@
   button,
   [type='submit'],
   [type='button'] {
-    background-color: #4f46e5;
+    background: linear-gradient(90deg, #4f46e5 0%, #7c3aed 100%);
     color: white;
     font-weight: bold;
     border-radius: 0.5rem;
@@ -64,7 +78,7 @@
   button:hover,
   [type='submit']:hover,
   [type='button']:hover {
-    background-color: #4338ca;
+    filter: brightness(1.08);
   }
 
   .button:active,
@@ -160,8 +174,10 @@
   }
 
   input[type="file"] {
-    background-color: white;
-    padding-left: 0;
+    background-color: #111827; /* gray-900 */
+    color: #e5e7eb; /* gray-200 */
+    border: 1px solid #374151; /* gray-700 */
+    padding: 0.5rem; /* ensure readable spacing */
   }
 
   .textarea,
@@ -171,10 +187,38 @@
   input[type="password"] {
     width: 100%;
     border-radius: 0.5rem;
-    padding: 1rem 1.25rem;
-    background-color: #f3f4f6;
-    border: 1px solid #ccc;
+    padding: 0.75rem 1rem;
+    background-color: #111827; /* gray-900 */
+    color: #e5e7eb; /* gray-200 */
+    border: 1px solid #374151; /* gray-700 */
     box-sizing: border-box;
+  }
+
+  /* Give textareas a bit more top padding so placeholder isn't tight */
+  textarea { padding-top: 1rem; }
+
+  textarea::placeholder,
+  input::placeholder { color: #9ca3af; }
+
+  /* Improve file input button for readability */
+  input[type="file"]::file-selector-button {
+    background: linear-gradient(90deg, #4f46e5 0%, #7c3aed 100%);
+    color: #ffffff;
+    border: none;
+    padding: 0.5rem 0.75rem;
+    margin-right: 0.75rem;
+    border-radius: 0.5rem;
+    cursor: pointer;
+  }
+  input[type="file"]::file-selector-button:hover { filter: brightness(1.08); }
+
+  /* Chat input explicit overrides to ensure visibility over base styles */
+  #chat_message_form input[type="text"] {
+    background-color: #1f2937 !important; /* gray-800 */
+    color: #e5e7eb !important; /* gray-200 */
+  }
+  #chat_message_form input[type="text"]::placeholder {
+    color: #9ca3af !important; /* gray-400 */
   }
 
   .errorlist li {
@@ -222,11 +266,12 @@
 </style>
 
 </head>
-<body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' class="{% block class %}{% endblock %}">
+<body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' class="bg-gray-950 text-gray-100 min-h-screen {% block class %}{% endblock %}">
 	
     {% include 'includes/messages.html' %}
 
     {% include 'includes/header.html' %}
+    <div style="height:56px"></div>
 
     {% block layout %}
     {% endblock %}

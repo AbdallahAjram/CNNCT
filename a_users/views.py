@@ -10,6 +10,7 @@ from django.contrib.auth.models import User
 from django.contrib.auth.views import redirect_to_login
 from django.contrib import messages
 from .forms import *
+from .models import BlockedUser
 
 def send_email_confirmation(request, user, signup=False):
     """
@@ -28,35 +29,64 @@ def send_email_confirmation(request, user, signup=False):
     )
 
 def profile_view(request, username=None):
+    # Merge view/edit: if viewing own profile, allow edit in same template
     if username:
         profile = get_object_or_404(User, username=username).profile
+        is_self = request.user.is_authenticated and request.user == profile.user
     else:
         try:
             profile = request.user.profile
         except:
             return redirect_to_login(request.get_full_path())
-    return render(request, 'a_users/profile.html', {'profile':profile})
+        is_self = True
+
+    form = None
+    if is_self:
+        form = ProfileForm(instance=profile)
+        if request.method == 'POST':
+            form = ProfileForm(request.POST, request.FILES, instance=profile)
+            if form.is_valid():
+                form.save()
+                return redirect('profile')
+
+    return render(request, 'a_users/profile.html', {'profile': profile, 'form': form, 'is_self': is_self})
 
 @login_required
 def profile_edit_view(request):
-    form = ProfileForm(instance=request.user.profile)  
-    
-    if request.method == 'POST':
-        form = ProfileForm(request.POST, request.FILES, instance=request.user.profile)
-        if form.is_valid():
-            form.save()
-            return redirect('profile')
-        
-    if request.path == reverse('profile-onboarding'):
-        onboarding = True
-    else:
-        onboarding = False
-      
-    return render(request, 'a_users/profile_edit.html', { 'form':form, 'onboarding':onboarding })
+    # Redirect to merged profile page
+    return redirect('profile')
 
 @login_required
 def profile_settings_view(request):
-    return render(request, 'a_users/profile_settings.html')
+    blocked = BlockedUser.objects.filter(blocker=request.user).select_related('blocked__profile').order_by('-blocked_at')
+    return render(request, 'a_users/profile_settings.html', { 'blocked_users': blocked })
+
+@login_required
+def profile_blocked_list(request):
+    blocked = BlockedUser.objects.filter(blocker=request.user).select_related('blocked__profile').order_by('-blocked_at')
+    return render(request, 'a_users/partials/blocked_list.html', { 'blocked_users': blocked })
+
+@login_required
+def profile_block_user(request, username):
+    target = get_object_or_404(User, username=username)
+    if target.id == request.user.id:
+        return redirect('profile-settings')
+    BlockedUser.objects.get_or_create(blocker=request.user, blocked=target)
+    messages.success(request, f'Blocked @{target.username}.')
+    # If called via HTMX from chat, redirect back to chat index silently
+    if getattr(request, 'htmx', False):
+        from django.http import HttpResponse
+        resp = HttpResponse(status=204)
+        resp['HX-Redirect'] = reverse('home')
+        return resp
+    return redirect('profile-settings')
+
+@login_required
+def profile_unblock_user(request, username):
+    target = get_object_or_404(User, username=username)
+    BlockedUser.objects.filter(blocker=request.user, blocked=target).delete()
+    messages.success(request, f'Unblocked @{target.username}.')
+    return redirect('profile-settings')
 
 @login_required
 def profile_emailchange(request):

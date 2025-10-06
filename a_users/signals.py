@@ -10,9 +10,17 @@ def user_postsave(sender, instance, created, **kwargs):
     
     # add profile if user is created
     if created:
-        Profile.objects.create(
-            user = user,
-        )
+        p = Profile.objects.create(user=user)
+        # Ensure phone is set for new users (incremental assignment is handled in migration for existing)
+        if not p.phone:
+            # naive assign based on last phone assigned
+            try:
+                last = Profile.objects.exclude(phone__isnull=True).exclude(phone__exact='').order_by('-id').first()
+                base = int(last.phone) + 1 if last and str(last.phone).isdigit() else 76900300
+            except Exception:
+                base = 76900300
+            p.phone = str(base)
+            p.save(update_fields=['phone'])
     else:
         # update allauth emailaddress if exists 
         try:

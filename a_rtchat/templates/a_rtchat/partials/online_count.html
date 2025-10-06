@@ -9,10 +9,21 @@
             animation: fadeInScale 0.3s ease;
         }
     </style>
-</span>   
-
-{ % if online_count % }
-<div id="online-icon" class="absolute top-2 left-2 rounded-full bg-green-500 p-1.5"></div>
-{ % else % }
-<div id="online-icon" class="absolute top-2 left-2 rounded-full bg-gray-500 p-1.5"></div>
-{ % endif % }
+</span>
+<script hx-swap-oob="true">
+(function(){
+  try{
+    const dot = document.getElementById('header-online-dot');
+    if(!dot) return;
+    const countEl = document.getElementById('online-count');
+    const count = parseInt(countEl && countEl.textContent ? countEl.textContent.trim() : '0', 10);
+    if (count >= 1) {
+      dot.classList.remove('bg-gray-500');
+      dot.classList.add('bg-emerald-500');
+    } else {
+      dot.classList.remove('bg-emerald-500');
+      dot.classList.add('bg-gray-500');
+    }
+  }catch(e){}
+})();
+</script>

@@ -27,7 +27,8 @@ object NotificationsStore {
 
     fun history(ctx: Context, chatId: String): List<Msg> {
         val sp = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE)
-        val arr = JSONArray(sp.getString(chatId, "[]"))
+        val raw = sp.getString(chatId, "[]") ?: "[]"
+        val arr = JSONArray(raw)
         val list = mutableListOf<Msg>()
         for (i in 0 until arr.length()) {
             val o = arr.getJSONObject(i)

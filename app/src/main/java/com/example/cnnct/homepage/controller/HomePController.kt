@@ -5,15 +5,10 @@ import com.example.cnnct.homepage.model.ChatSummary
 import com.google.android.gms.tasks.Tasks
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.*
+import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.tasks.await
+import java.util.GregorianCalendar
 
-/**
- * Controller for Home / Chats screen.
- * - REALTIME from /chats where members contains me (no userChats).
- * - Search users by displayName OR phone (Lebanese local format, digits only e.g. "03123456").
- * - Create-or-get private chat via deterministic pairKey.
- * - Status promotions (sent -> delivered) and mark last message read.
- */
 object HomePController {
     private val db = FirebaseFirestore.getInstance()
     private val auth = FirebaseAuth.getInstance()
@@ -25,26 +20,23 @@ object HomePController {
         val uid = auth.currentUser?.uid ?: return null
         return db.collection("chats")
             .whereArrayContains("members", uid)
-            // No orderBy to avoid index requirements; sort client-side
             .addSnapshotListener { snap, err ->
                 if (err != null) {
                     Log.e("HomePController", "listenMyChats error", err)
-                    onResult(emptyList())
-                    return@addSnapshotListener
+                    onResult(emptyList()); return@addSnapshotListener
                 }
-                val list = snap?.documents?.mapNotNull { toChatSummary(it) } ?: emptyList()
+                val list = snap?.documents?.mapNotNull { toChatSummary(it, uid) } ?: emptyList()
                 onResult(sortChats(list))
             }
     }
 
-    // ---------------- One-shot preload (splash) ----------------
     fun getMyChats(onResult: (List<ChatSummary>) -> Unit) {
         val uid = auth.currentUser?.uid ?: return onResult(emptyList())
         db.collection("chats")
             .whereArrayContains("members", uid)
             .get()
             .addOnSuccessListener { snap ->
-                val list = snap.documents.mapNotNull { toChatSummary(it) }
+                val list = snap.documents.mapNotNull { toChatSummary(it, uid) }
                 onResult(sortChats(list))
             }
             .addOnFailureListener { e ->
@@ -53,7 +45,6 @@ object HomePController {
             }
     }
 
-    // Backward-compatible alias for your splash
     fun getUserChats(onChatsFetched: (List<ChatSummary>) -> Unit) = getMyChats(onChatsFetched)
 
     private fun sortChats(list: List<ChatSummary>): List<ChatSummary> {
@@ -65,7 +56,8 @@ object HomePController {
         }
     }
 
-    private fun toChatSummary(meta: DocumentSnapshot): ChatSummary? {
+    // NOTE: aware of memberMeta → iBlockedPeer / blockedByOther (for *me*)
+    private fun toChatSummary(meta: DocumentSnapshot, me: String): ChatSummary? {
         return try {
             val chatId = meta.id
             val groupName = meta.getString("groupName")
@@ -79,6 +71,12 @@ object HomePController {
             val isReadLegacy = meta.getBoolean("lastMessageIsRead") ?: false
             val status = statusRaw ?: if (isReadLegacy) "read" else null
 
+            // my-side block flags from memberMeta
+            val memberMeta = meta.get("memberMeta") as? Map<*, *>
+            val myMeta = (memberMeta?.get(me) as? Map<*, *>)
+            val iBlockedPeer = (myMeta?.get("iBlockedPeer") as? Boolean)
+            val blockedByOther = (myMeta?.get("blockedByOther") as? Boolean)
+
             ChatSummary(
                 id = chatId,
                 groupName = groupName,
@@ -90,14 +88,16 @@ object HomePController {
                 type = type,
                 createdAt = meta.getTimestamp("createdAt"),
                 updatedAt = meta.getTimestamp("updatedAt"),
-                lastMessageStatus = status
+                lastMessageStatus = status,
+                iBlockedPeer = iBlockedPeer,
+                blockedByOther = blockedByOther
             )
         } catch (e: Exception) {
             Log.e("HomePController", "toChatSummary parse ${meta.id}", e); null
         }
     }
 
-    // ---------------- Search: displayName OR (Lebanese) phone ----------------
+    // ---------------- Search: displayName OR phone ----------------
     fun searchUsersByNameOrPhone(
         query: String,
         limit: Long = 20,
@@ -156,7 +156,6 @@ object HomePController {
 
         val pairKey = makePairKey(me, otherUserId)
 
-        // (1) PairKey fast path
         db.collection("chats")
             .whereEqualTo("type", "private")
             .whereEqualTo("pairKey", pairKey)
@@ -168,7 +167,6 @@ object HomePController {
                     return@addOnSuccessListener
                 }
 
-                // (2) Fallback: my private chats that contain other
                 db.collection("chats")
                     .whereArrayContains("members", me)
                     .whereEqualTo("type", "private")
@@ -271,10 +269,8 @@ object HomePController {
         other: String,
         onResult: (String?) -> Unit
     ) {
-        val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
-        val a = me
-        val b = other
-        val pairKey = if (a < b) "$a#$b" else "$b#$a"
+        val db = FirebaseFirestore.getInstance()
+        val pairKey = makePairKey(me, other)
         val chatId = "priv_$pairKey"
         val ref = db.collection("chats").document(chatId)
 
@@ -285,7 +281,7 @@ object HomePController {
                 } else {
                     val data = mapOf(
                         "type" to "private",
-                        "members" to listOf(a, b),
+                        "members" to listOf(me, other),
                         "pairKey" to pairKey,
                         "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
                         "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
@@ -293,14 +289,43 @@ object HomePController {
                     ref.set(data)
                         .addOnSuccessListener { onResult(chatId) }
                         .addOnFailureListener { e ->
-                            android.util.Log.e("HomePController", "create chat failed", e)
+                            Log.e("HomePController", "create chat failed", e)
                             onResult(null)
                         }
                 }
             }
             .addOnFailureListener { e ->
-                android.util.Log.e("HomePController", "get chat failed", e)
+                Log.e("HomePController", "get chat failed", e)
                 onResult(null)
             }
+    }
+
+    // ---------------- Per-chat mute helpers (under /userChats/{me}/chats/{chatId}) ----------------
+    suspend fun setChatMutedUntil(me: String, chatId: String, mutedUntilMs: Long?) {
+        val ref = db.collection("userChats").document(me)
+            .collection("chats").document(chatId)
+
+        val data = if (mutedUntilMs == null) {
+            mapOf("mutedUntil" to FieldValue.delete())
+        } else {
+            // Timestamp(seconds, nanoseconds)
+            mapOf("mutedUntil" to com.google.firebase.Timestamp(mutedUntilMs / 1000, ((mutedUntilMs % 1000).toInt()) * 1_000_000))
+        }
+
+        ref.set(data, SetOptions.merge()).await()
+    }
+
+    suspend fun muteChatForHours(me: String, chatId: String, hours: Long) {
+        val untilMs = System.currentTimeMillis() + hours * 60L * 60L * 1000L
+        setChatMutedUntil(me, chatId, untilMs)
+    }
+
+    suspend fun muteChatForever(me: String, chatId: String) {
+        val farFuture = GregorianCalendar(2100, 0, 1, 0, 0, 0).timeInMillis
+        setChatMutedUntil(me, chatId, farFuture)
+    }
+
+    suspend fun unmuteChat(me: String, chatId: String) {
+        setChatMutedUntil(me, chatId, null)
     }
 }

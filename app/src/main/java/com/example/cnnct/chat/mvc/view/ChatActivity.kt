@@ -1,14 +1,22 @@
 package com.example.cnnct.chat.view
 
-import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.annotation.RequiresApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldPath
@@ -18,7 +26,6 @@ import kotlinx.coroutines.tasks.await
 import com.cnnct.chat.mvc.model.FirestoreChatRepository
 import com.cnnct.chat.mvc.controller.ChatController
 import com.cnnct.chat.mvc.view.ChatScreen
-import com.example.cnnct.calls.InCallActivity
 import com.example.cnnct.calls.controller.CallsController
 import com.example.cnnct.homepage.controller.HomePController
 
@@ -34,7 +41,7 @@ class ChatActivity : ComponentActivity() {
         val controller = ChatController(repo, currentUserId)
 
         setContent {
-            val context = LocalContext.current // ✅ use inside Compose
+            val context = LocalContext.current
             val db = Firebase.firestore
             var chatType by remember { mutableStateOf("private") }
             var otherUserId by remember { mutableStateOf<String?>(null) }
@@ -47,10 +54,14 @@ class ChatActivity : ComponentActivity() {
             var headerSubtitle by remember { mutableStateOf<String?>(null) }
             var headerPhotoUrl by remember { mutableStateOf<String?>(null) }
 
-            var blockedSet by remember { mutableStateOf<Set<String>>(emptySet()) }
+            // Local state: did I block the other user?
+            var iBlockedOther by remember { mutableStateOf(false) }
+            var blockListener: ListenerRegistration? by remember { mutableStateOf<ListenerRegistration?>(null) }
 
             // Load chat meta
             LaunchedEffect(chatId) {
+                controller.openChat(chatId)
+
                 val chatSnap = db.collection("chats").document(chatId).get().await()
                 val type = chatSnap.getString("type") ?: "private"
                 chatType = type
@@ -58,11 +69,23 @@ class ChatActivity : ComponentActivity() {
                 val members = (chatSnap.get("members") as? List<String>).orEmpty()
                 memberIds = members
 
-                blockedSet = (chatSnap.get("blocked") as? List<String>)?.toSet() ?: emptySet()
-
                 if (type == "private") {
                     otherUserId = members.firstOrNull { it != currentUserId }
+                    controller.setPeerUser(otherUserId)
+
                     otherUserId?.let { other ->
+                        // Listen to my block doc for this peer
+                        blockListener?.remove()
+                        blockListener = db.collection("users")
+                            .document(currentUserId)
+                            .collection("blocks")
+                            .document(other)
+                            .addSnapshotListener { snap, _ ->
+                                val blocked = snap?.exists() == true
+                                iBlockedOther = blocked
+                                controller.setIBlockedPeer(blocked)
+                            }
+
                         val userDoc = db.collection("users").document(other).get().await()
                         val dn = userDoc.getString("displayName") ?: "Unknown"
                         val photo = userDoc.getString("photoUrl")
@@ -94,9 +117,16 @@ class ChatActivity : ComponentActivity() {
                 }
             }
 
-            // Member meta
+            // Member meta (stream)
             val memberMeta by produceState<Map<String, Any>?>(initialValue = null, chatId) {
                 repo.streamChatMemberMeta(chatId).collect { value = it }
+            }
+
+            // Did the other user block ME? (mirrored via memberMeta[myUid].blockedByOther)
+            val blockedByOther: Boolean by remember(memberMeta, currentUserId) {
+                mutableStateOf(
+                    ((memberMeta?.get(currentUserId) as? Map<*, *>)?.get("blockedByOther") as? Boolean) == true
+                )
             }
 
             // Last online map
@@ -131,40 +161,52 @@ class ChatActivity : ComponentActivity() {
                 (ts as? com.google.firebase.Timestamp)?.toDate()?.time
             }
 
-            ChatScreen(
-                chatId = chatId,
-                currentUserId = currentUserId,
-                controller = controller,
-                chatType = chatType,
-                title = headerTitle,
-                subtitle = headerSubtitle,
-                nameOf = { uid -> nameMap[uid] ?: uid },
-                userPhotoOf = { uid: String -> photoMap[uid] },
-                headerPhotoUrl = headerPhotoUrl,
-                otherUserId = otherUserId,
-                otherLastReadId = otherLastReadId,
-                otherLastOpenedAtMs = otherLastOpenedAtMs,
-                memberIds = memberIds,
-                memberMeta = memberMeta,
-                blockedUserIds = blockedSet,
-                onlineMap = membersOnlineMap,
-                onBack = { finish() },
-                onCallClick = {
-                    val calleeId = otherUserId ?: return@ChatScreen
-                    val callsController = CallsController(context)
+            // UI
+            Surface {
+                Column {
+                    ChatScreen(
+                        chatId = chatId,
+                        currentUserId = currentUserId,
+                        controller = controller,
+                        chatType = chatType,
+                        title = headerTitle,
+                        subtitle = headerSubtitle,
+                        nameOf = { uid -> nameMap[uid] ?: uid },
+                        userPhotoOf = { uid: String -> photoMap[uid] },
+                        headerPhotoUrl = headerPhotoUrl,
+                        otherUserId = otherUserId,
+                        otherLastReadId = otherLastReadId,
+                        otherLastOpenedAtMs = otherLastOpenedAtMs,
+                        memberIds = memberIds,
+                        memberMeta = memberMeta,
 
-                    callsController.startCall(
-                        calleeId,
-                        onCreated = {
-                            //calls controller will take care of it
-                        },
-                        onError = { error ->
-                            Toast.makeText(context, "Failed to start call: ${error.message}", Toast.LENGTH_LONG).show()
+                        // 🔴 pass block flags
+                        iBlockedPeer = iBlockedOther,
+                        blockedByOther = blockedByOther,
+
+                        // red presence dot on my side if I blocked them
+                        blockedUserIds = if (iBlockedOther && otherUserId != null) setOf(otherUserId!!) else emptySet(),
+                        onlineMap = membersOnlineMap,
+
+                        onBack = { finish() },
+                        onCallClick = {
+                            val calleeId = otherUserId ?: return@ChatScreen
+                            val callsController = CallsController(context)
+                            callsController.startCall(
+                                calleeId,
+                                onCreated = { /* handled by CallsController */ },
+                                onError = { error ->
+                                    Toast.makeText(
+                                        context,
+                                        "Failed to start call: ${error.message}",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            )
                         }
                     )
                 }
-
-            )
+            }
         }
     }
 
@@ -176,9 +218,9 @@ class ChatActivity : ComponentActivity() {
         com.example.cnnct.notifications.ForegroundTracker.setCurrentChat(chatId)
 
         // cancel any existing notification for this chat and clear local history
-        val id = (chatId ?: "").hashCode()
+        val id = (chatId).hashCode()
         androidx.core.app.NotificationManagerCompat.from(this).cancel(id)
-        com.example.cnnct.notifications.NotificationsStore.clearHistory(this, chatId ?: "")
+        com.example.cnnct.notifications.NotificationsStore.clearHistory(this, chatId)
     }
 
     override fun onPause() {

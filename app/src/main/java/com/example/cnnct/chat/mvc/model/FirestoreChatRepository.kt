@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.database.Cursor
 import android.net.Uri
 import android.provider.OpenableColumns
+import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
@@ -26,10 +27,29 @@ class FirestoreChatRepository(
     private fun messages(chatId: String) = chats().document(chatId).collection("messages")
     private fun userChatMeta(userId: String, chatId: String) =
         db.collection("userChats").document(userId).collection("chats").document(chatId)
+    private fun blocks(userId: String, peerId: String) =
+        db.collection("users").document(userId).collection("blocks").document(peerId)
+
+    // -------- Helpers --------
+
+    private fun makePairKey(a: String, b: String): String {
+        val (x, y) = listOf(a, b).sorted()
+        return "$x#$y"
+    }
+
+    // Client-side check we *can* do: have I blocked them?
+    private suspend fun iBlockedPeer(me: String, other: String): Boolean {
+        return blocks(me, other).get().await().exists()
+    }
+
+    // -------- Public API --------
 
     override suspend fun ensurePrivateChat(userA: String, userB: String): String {
-        val chatId = listOf(userA, userB).sorted().joinToString("_")
+        val pairKey = makePairKey(userA, userB)
+        // Align with your HomePController doc-id scheme if you use it elsewhere:
+        val chatId = "priv_$pairKey"
         val chatRef = chats().document(chatId)
+
         val snap = chatRef.get().await()
         if (!snap.exists()) {
             val now = FieldValue.serverTimestamp()
@@ -37,13 +57,15 @@ class FirestoreChatRepository(
                 mapOf(
                     "type" to "private",
                     "members" to listOf(userA, userB),
+                    "pairKey" to pairKey,              // ✅ include pairKey to satisfy rules
                     "createdAt" to now,
                     "updatedAt" to now,
                     "lastMessageText" to "",
                     "lastMessageTimestamp" to null,
-                    "lastMessageSenderId" to "",
-                    "lastMessageId" to ""
-                ), SetOptions.merge()
+                    "lastMessageSenderId" to null,
+                    "lastMessageId" to null
+                ),
+                SetOptions.merge()
             ).await()
         }
         return chatId
@@ -54,6 +76,16 @@ class FirestoreChatRepository(
         senderId: String,
         draft: MessageDraft
     ) {
+        // Guard: if I blocked the peer, no-op (smoother UX than letting rules 403)
+        // Note: we can only check *my* block list client-side.
+        val chatSnap = chats().document(chatId).get().await()
+        val members = (chatSnap.get("members") as? List<String>).orEmpty()
+        val peerId = members.firstOrNull { it != senderId }
+        if (peerId != null && iBlockedPeer(senderId, peerId)) {
+            // silently ignore or throw? We choose to throw so UI can show a banner/toast if desired
+            throw IllegalStateException("You blocked this user")
+        }
+
         val chatRef = chats().document(chatId)
         val msgRef  = messages(chatId).document()
 
@@ -73,13 +105,14 @@ class FirestoreChatRepository(
                 "hiddenFor"         to emptyList<String>(),
                 "deletedBy"         to null,
                 "deletedAt"         to null,
-                "createdAtClient"   to com.google.firebase.Timestamp.now()
+                "createdAtClient"   to Timestamp.now()
             ))
 
             val summaryText = when {
                 draft.type == MessageType.text -> draft.text.orEmpty()
                 (draft.contentType ?: "").startsWith("image/") -> "📷 Photo"
                 (draft.contentType ?: "").startsWith("video/") -> "🎬 Video"
+                draft.type.name.equals("location", ignoreCase = true) -> "📍 Location"
                 else -> "📎 ${draft.fileName ?: "Attachment"}"
             }
 
@@ -167,9 +200,9 @@ class FirestoreChatRepository(
             trySend(
                 if (data == null) null else UserChatMeta(
                     lastReadMessageId = data["lastReadMessageId"] as? String,
-                    lastOpenedAt = data["lastOpenedAt"] as? com.google.firebase.Timestamp,
+                    lastOpenedAt = data["lastOpenedAt"] as? Timestamp,
                     pinned = (data["pinned"] as? Boolean) ?: false,
-                    mutedUntil = data["mutedUntil"] as? com.google.firebase.Timestamp
+                    mutedUntil = data["mutedUntil"] as? Timestamp
                 )
             )
         }
@@ -194,6 +227,32 @@ class FirestoreChatRepository(
         ).await()
     }
 
+    // ======= Preview helper for controller =======
+    override suspend fun updateUserPreview(ownerUserId: String, chatId: String, latest: Message?) {
+        val ts = latest?.createdAt ?: latest?.createdAtClient
+        val previewText: String? = when {
+            latest == null -> null
+            latest.type == MessageType.text -> latest.text?.take(500)
+            latest.type == MessageType.image -> "Photo"
+            latest.type == MessageType.video -> "Video"
+            latest.type == MessageType.file -> latest.text ?: "File"
+            latest.type.name.equals("location", ignoreCase = true) -> "Location"
+            else -> latest.text ?: latest.type.name.lowercase().replaceFirstChar { it.uppercase() }
+        }
+
+        userChatMeta(ownerUserId, chatId).set(
+            mapOf(
+                "lastMessageId" to latest?.id,
+                "lastMessageText" to previewText,
+                "lastMessageType" to latest?.type?.name,
+                "lastMessageSenderId" to latest?.senderId,
+                "lastMessageTimestamp" to ts,
+                "updatedAt" to FieldValue.serverTimestamp()
+            ),
+            SetOptions.merge()
+        ).await()
+    }
+
     // ========== attachments ==========
 
     override suspend fun sendAttachmentMessage(
@@ -202,6 +261,7 @@ class FirestoreChatRepository(
         localUri: Uri,
         contentResolver: ContentResolver
     ) {
+        // We’ll reuse iBlockedPeer() check inside sendMessage (called at the end)
         val info = resolveUriInfo(contentResolver, localUri)
         val folder = when {
             info.contentType.startsWith("image/") -> "images"
@@ -288,12 +348,12 @@ class FirestoreChatRepository(
         db.runBatch { b ->
             b.update(msgRef, mapOf(
                 "text" to trimmed,
-                "editedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                "editedAt" to FieldValue.serverTimestamp()
             ))
             if (lastId == messageId) {
                 b.set(chatRef, mapOf(
                     "lastMessageText" to trimmed,
-                    "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                    "updatedAt" to FieldValue.serverTimestamp()
                 ), SetOptions.merge())
             }
         }.await()

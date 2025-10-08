@@ -7,10 +7,6 @@ import com.cnnct.chat.mvc.model.ChatRepository
 import com.cnnct.chat.mvc.model.Message
 import com.cnnct.chat.mvc.model.MessageDraft
 import com.cnnct.chat.mvc.model.MessageType
-import com.google.firebase.Firebase
-import com.google.firebase.firestore.FieldValue
-import com.google.firebase.firestore.SetOptions
-import com.google.firebase.firestore.firestore
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,8 +24,21 @@ class ChatController(
     private val _messages = MutableStateFlow<List<Message>>(emptyList())
     val messages: StateFlow<List<Message>> = _messages
 
-    // Track last preview we wrote for this user to avoid redundant writes
+    // last preview written
     private var lastPreviewMessageIdForMe: String? = null
+
+    // Blocking awareness
+    private var peerUserId: String? = null
+    private val _iBlockedPeer = MutableStateFlow(false)
+    val iBlockedPeer: StateFlow<Boolean> = _iBlockedPeer
+
+    // Surface send errors (e.g., PERMISSION_DENIED when the other has blocked me)
+    private val _sendError = MutableStateFlow<String?>(null)
+    val sendError: StateFlow<String?> = _sendError
+
+    fun setPeerUser(id: String?) { peerUserId = id }
+    fun setIBlockedPeer(blocked: Boolean) { _iBlockedPeer.value = blocked }
+    fun clearError() { _sendError.value = null }
 
     private fun Message.sentAtMs(): Long =
         this.createdAt?.toDate()?.time ?: this.createdAtClient?.toDate()?.time ?: 0L
@@ -43,7 +52,6 @@ class ChatController(
                 if (list.size > oldSize) {
                     markDeliveredIfNeeded(chatId, currentUserId, list)
                 }
-                // Update my per-user last-message preview (ignoring hidden/deleted)
                 pushMyPreviewIfChanged(chatId, list)
             }
         }
@@ -52,16 +60,33 @@ class ChatController(
     fun sendText(chatId: String, senderId: String, text: String) {
         val clean = text.trim()
         if (clean.isEmpty()) return
+        // If I blocked the peer, don't send
+        if (_iBlockedPeer.value) {
+            _sendError.value = "You blocked this user. Unblock to chat."
+            return
+        }
         scope.launch {
-            repo.sendMessage(chatId, senderId, MessageDraft(text = clean))
+            try {
+                repo.sendMessage(chatId, senderId, MessageDraft(text = clean))
+            } catch (e: Exception) {
+                // PERMISSION_DENIED or other error (likely peer blocked me)
+                _sendError.value = "Message not sent. You may be blocked."
+            }
         }
     }
 
     fun sendAttachments(chatId: String, senderId: String, uris: List<Uri>, cr: ContentResolver) {
         if (uris.isEmpty()) return
+        if (_iBlockedPeer.value) {
+            _sendError.value = "You blocked this user. Unblock to chat."
+            return
+        }
         scope.launch(Dispatchers.IO) {
-            // sequential = preserves user-selected order
-            uris.forEach { uri -> repo.sendAttachmentMessage(chatId, senderId, uri, cr) }
+            try {
+                uris.forEach { uri -> repo.sendAttachmentMessage(chatId, senderId, uri, cr) }
+            } catch (e: Exception) {
+                _sendError.value = "Attachment not sent. You may be blocked."
+            }
         }
     }
 
@@ -75,7 +100,6 @@ class ChatController(
 
     fun stop() {
         streamJob?.cancel()
-        // Only cancel the scope if we created it; don't cancel a caller-owned scope.
         if (externalScope == null) {
             scope.cancel()
         }
@@ -99,86 +123,61 @@ class ChatController(
     fun editMessage(chatId: String, messageId: String, newText: String) {
         val trimmed = newText.trim()
         if (trimmed.isEmpty()) return
-        // Optional no-op guard: skip if text unchanged
         val current = _messages.value.firstOrNull { it.id == messageId }?.text?.trim()
         if (!current.isNullOrEmpty() && current == trimmed) return
 
         scope.launch {
-            repo.editMessage(chatId, messageId, currentUserId, trimmed)
+            try {
+                repo.editMessage(chatId, messageId, currentUserId, trimmed)
+            } catch (e: Exception) {
+                _sendError.value = "Edit failed."
+            }
         }
     }
 
     fun deleteForEveryone(chatId: String, messageIds: List<String>) {
         if (messageIds.isEmpty()) return
         scope.launch {
-            messageIds.forEach { id ->
-                repo.deleteForEveryone(chatId, id, currentUserId)
+            try {
+                messageIds.forEach { id -> repo.deleteForEveryone(chatId, id, currentUserId) }
+                pushMyPreviewIfChanged(chatId, _messages.value)
+            } catch (e: Exception) {
+                _sendError.value = "Delete failed."
             }
-            // stream collector will recompute preview on next snapshot,
-            // but we can also try now with current cache:
-            pushMyPreviewIfChanged(chatId, _messages.value)
         }
     }
 
     fun deleteForMe(chatId: String, messageIds: List<String>) {
         if (messageIds.isEmpty()) return
         scope.launch {
-            messageIds.forEach { id ->
-                repo.deleteForMe(chatId, id, currentUserId)
+            try {
+                messageIds.forEach { id -> repo.deleteForMe(chatId, id, currentUserId) }
+                pushMyPreviewIfChanged(chatId, _messages.value)
+            } catch (e: Exception) {
+                _sendError.value = "Delete failed."
             }
-            // Optimistically recompute my preview from current cache;
-            // stream collector will also recompute when Firestore pushes the update.
-            pushMyPreviewIfChanged(chatId, _messages.value)
         }
     }
 
     /* ============================================================
-       Per-user Home preview (fixes: "Delete for me" still shows on Home)
-       We write to: /userChats/{me}/chats/{chatId}
+       Per-user Home preview
        ============================================================ */
-
     private fun pushMyPreviewIfChanged(chatId: String, list: List<Message>) {
-        // Find latest message that is NOT deleted and NOT hidden for me
         val latest = list.asReversed().firstOrNull { m ->
             !m.deleted && (m.hiddenFor?.contains(currentUserId) != true)
         }
 
         val latestId = latest?.id
-        if (latestId == lastPreviewMessageIdForMe) return  // no change
-
+        if (latestId == lastPreviewMessageIdForMe) return
         lastPreviewMessageIdForMe = latestId
 
-        scope.launch(Dispatchers.IO) {
+        CoroutineScope(Dispatchers.IO).launch {
             try {
-                val db = Firebase.firestore
-                val ref = db.collection("userChats")
-                    .document(currentUserId)
-                    .collection("chats")
-                    .document(chatId)
-
-                // Build a WhatsApp-like preview text for attachments
-                val previewText: String? = when {
-                    latest == null -> null
-                    latest.type == MessageType.text -> latest.text?.take(500) // keep it short
-                    latest.type == MessageType.image -> "Photo"
-                    latest.type == MessageType.video -> "Video"
-                    latest.type == MessageType.file -> latest.text ?: "File"
-                    latest.type.name.equals("location", ignoreCase = true) -> "Location"
-                    else -> latest.text ?: latest.type.name.lowercase().replaceFirstChar { it.uppercase() }
-                }
-
-                val ts = latest?.createdAt ?: latest?.createdAtClient
-
-                val data = hashMapOf<String, Any?>(
-                    "lastMessageId" to latest?.id,
-                    "lastMessageText" to previewText,
-                    "lastMessageType" to latest?.type?.name,
-                    "lastMessageSenderId" to latest?.senderId,
-                    "lastMessageTimestamp" to ts,
-                    "updatedAt" to FieldValue.serverTimestamp()
+                repo.updateUserPreview(
+                    ownerUserId = currentUserId,
+                    chatId = chatId,
+                    latest = latest
                 )
-
-                ref.set(data, SetOptions.merge())
             } catch (_: Exception) {
                 // ignore; next snapshot will try again
             }

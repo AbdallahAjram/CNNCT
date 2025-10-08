@@ -6,13 +6,14 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.example.cnnct.notifications.MuteStore
 import com.example.cnnct.notifications.NotificationHelper
 import com.example.cnnct.notifications.TokenRegistrar
-import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.SetOptions
-import com.google.firebase.firestore.firestore
+import com.google.firebase.firestore.ktx.firestore
+import com.google.firebase.ktx.Firebase
 import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,54 +38,39 @@ class App : Application(), LifecycleEventObserver {
         // Observe process lifecycle for heartbeat
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
 
-        // Keep FCM token mapped to the signed-in user and manage heartbeat on auth changes
+        // Manage token + heartbeat + MuteStore with auth changes
         val auth = FirebaseAuth.getInstance()
         authListener = FirebaseAuth.AuthStateListener { fa ->
             val user = fa.currentUser
             if (user != null) {
-                // Upsert current FCM token under /users/{uid}.fcmTokens[deviceId]
+                // Start/refresh per-chat mute listener as soon as the user is signed in
+                MuteStore.start()
+
+                // Upsert current FCM token
                 appScope.launch {
-                    try {
+                    runCatching {
                         val token = FirebaseMessaging.getInstance().token.await()
                         TokenRegistrar.upsertToken(applicationContext, token)
-                    } catch (_: Exception) { /* ignore */ }
+                    }
                 }
-                // If app is in foreground, ensure heartbeat running for this uid
+
+                // If app is foreground, ensure heartbeat running
                 if (ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
                     startHeartbeat(user.uid)
                 }
             } else {
                 stopHeartbeat()
+                MuteStore.stop()
             }
         }
         auth.addAuthStateListener(authListener!!)
-
-        // ✅ NEW: Preload notification prefs into local cache once at startup
-        appScope.launch {
-            try {
-                val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return@launch
-                val snap = Firebase.firestore.collection("users").document(uid).get().await()
-                val notificationsEnabled = snap.getBoolean("notificationsEnabled") ?: true
-                val chatEnabled = snap.getBoolean("chatNotificationsEnabled") ?: true
-                val callEnabled = snap.getBoolean("callNotificationsEnabled") ?: true
-
-                com.example.cnnct.notifications.SettingsCache.save(
-                    this@App,
-                    com.example.cnnct.notifications.NotifPrefs(
-                        notificationsEnabled = notificationsEnabled,
-                        chatNotificationsEnabled = chatEnabled,
-                        callNotificationsEnabled = callEnabled
-                    )
-                )
-            } catch (_: Exception) { /* ignore – best effort */ }
-        }
     }
-
 
     override fun onTerminate() {
         super.onTerminate()
         authListener?.let { FirebaseAuth.getInstance().removeAuthStateListener(it) }
         stopHeartbeat()
+        MuteStore.stop()
     }
 
     // Lifecycle → start/stop heartbeat based on foreground/background
@@ -99,21 +85,19 @@ class App : Application(), LifecycleEventObserver {
     }
 
     private fun startHeartbeat(uid: String) {
-        // Restart for new uid if needed
         if (heartbeatJob != null) {
-            // If same uid, keep running
             if (FirebaseAuth.getInstance().currentUser?.uid == uid) return
             stopHeartbeat()
         }
         heartbeatJob = appScope.launch {
             val users = Firebase.firestore.collection("users").document(uid)
             while (true) {
-                try {
+                runCatching {
                     users.set(
                         mapOf("lastOnlineAt" to FieldValue.serverTimestamp()),
                         SetOptions.merge()
                     )
-                } catch (_: Exception) { /* ignore transient errors */ }
+                }
                 delay(20_000) // 20s
             }
         }

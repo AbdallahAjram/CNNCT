@@ -9,15 +9,15 @@
         android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission/FOREGROUND_SERVICE" tools:ignore="ScopedStorage" />
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
-    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" android:required="false"/>
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_CONNECT"
+        android:required="false" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
 
@@ -33,7 +33,7 @@
         android:theme="@style/Theme.CNNCT"
         tools:targetApi="31">
 
-        <!-- FileProvider for sharing temporary files (e.g., if you ever need it) -->
+        <!-- FileProvider for sharing temporary files -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -43,20 +43,22 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- The ONLY Firebase Messaging service that handles pushes -->
         <service
             android:name=".calls.PushService"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.google.firebase.MESSAGING_EVENT"/>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
+
         <activity
             android:name=".calls.CallActionActivity"
             android:exported="false"
             android:theme="@style/Theme.Transparent" />
 
-        <!-- Splash/MainActivity: it extends AppCompatActivity, so give it an AppCompat theme.
-             This fixes: "You need to use a Theme.AppCompat theme (or descendant) with this activity." -->
+        <!-- Launcher -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -105,10 +107,9 @@
 
         <activity
             android:name=".notifications.view.NotificationSettingsActivity"
-            android:exported="false"/>
+            android:exported="false" />
 
-        <!-- CanHub Cropper: MUST have an ActionBar to display Back/Done.
-             Use a built-in DarkActionBar theme so buttons appear immediately. -->
+        <!-- CanHub Cropper: needs an ActionBar -->
         <activity
             android:name="com.canhub.cropper.CropImageActivity"
             android:theme="@style/Theme.MaterialComponents.DayNight.DarkActionBar"
@@ -122,9 +123,11 @@
             android:turnScreenOn="true"
             android:launchMode="singleTop"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
-        <activity android:name=".calls.InCallActivity"
-                  android:exported="false"
-            android:launchMode="singleTop"/>
+
+        <activity
+            android:name=".calls.InCallActivity"
+            android:exported="false"
+            android:launchMode="singleTop" />
 
     </application>
 </manifest>

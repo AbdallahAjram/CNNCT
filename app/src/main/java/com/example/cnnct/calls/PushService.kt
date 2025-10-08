@@ -1,10 +1,10 @@
 package com.example.cnnct.calls
 
 import android.Manifest
-import android.app.PendingIntent
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.util.Log
 import androidx.annotation.RequiresPermission
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -15,80 +15,132 @@ import coil.size.Size
 import com.example.cnnct.R
 import com.example.cnnct.chat.view.ChatActivity
 import com.example.cnnct.notifications.ForegroundTracker
+import com.example.cnnct.notifications.MuteStore
 import com.example.cnnct.notifications.NotificationHelper
 import com.example.cnnct.notifications.NotificationsStore
+import com.example.cnnct.notifications.SettingsCache
 import com.example.cnnct.notifications.TokenRegistrar
-import com.example.cnnct.notifications.SettingsCache            // ✅ added
+import com.google.android.gms.tasks.Tasks // <-- use Tasks.await for blocking fetch
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 class PushService : FirebaseMessagingService() {
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    override fun onCreate() {
+        super.onCreate()
+        // Warm mute cache so background FCM can drop muted chats.
+        FirebaseAuth.getInstance().currentUser?.let { MuteStore.start() }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        scope.cancel()
+    }
+
     override fun onNewToken(token: String) {
-        CoroutineScope(Dispatchers.IO).launch {
+        scope.launch {
             try { TokenRegistrar.upsertToken(applicationContext, token) } catch (_: Exception) {}
         }
     }
 
     @RequiresPermission(Manifest.permission.POST_NOTIFICATIONS)
-    override fun onMessageReceived(remoteMessage: RemoteMessage) {
+    override fun onMessageReceived(remoteMessage: RemoteMessage) { // <-- NOT suspend
         NotificationHelper.ensureChannels(this)
 
         val data = remoteMessage.data
-        val type = data["type"] ?: return
+        val type = data["type"] ?: remoteMessage.notification?.tag ?: return
         val user = FirebaseAuth.getInstance().currentUser ?: return
 
-        // ✅ Read cached prefs instantly (no network in FCM threads)
         val prefs = SettingsCache.load(this)
-        if (!prefs.notificationsEnabled) return  // Global OFF → bail early
+        if (!prefs.notificationsEnabled) return
+
+        Log.d("FCM_RAW", "type=$type data=$data notif=${remoteMessage.notification}")
 
         when (type) {
-
-            // ----------------------------- MESSAGES -----------------------------
-            "message" -> {
-                if (!prefs.chatNotificationsEnabled) return   // ✅ per-channel gate
+            // ---------------- CHAT / MESSAGE ----------------
+            "message", "chat" -> {
+                if (!prefs.chatNotificationsEnabled) return
 
                 val chatId = data["chatId"] ?: return
-                val senderName = data["senderName"] ?: "New message"
-                val text = data["text"] ?: ""
-                val senderPhotoUrl = data["senderPhotoUrl"] // may be null
 
-                // Suppress if chat is foreground
+                // Fast-path mute via local cache
+                if (MuteStore.isMuted(chatId)) {
+                    Log.d("FCM_MUTE", "Muted (cache) chatId=$chatId → drop")
+                    NotificationManagerCompat.from(this).cancel(chatId.hashCode())
+                    return
+                }
+
+                // Cold-start single fetch if cache might be cold (blocking okay on FCM thread)
+                val mutedFallback = try {
+                    val doc = Tasks.await(
+                        FirebaseFirestore.getInstance()
+                            .collection("userChats").document(user.uid)
+                            .collection("chats").document(chatId)
+                            .get()
+                    )
+                    val until = doc.getTimestamp("mutedUntil")?.toDate()?.time
+                    val now  = System.currentTimeMillis()
+                    until != null && now < until
+                } catch (e: Exception) {
+                    Log.w("FCM_MUTE", "Fallback mute fetch failed: $e")
+                    false
+                }
+                if (mutedFallback) {
+                    Log.d("FCM_MUTE", "Muted (fallback) chatId=$chatId → drop")
+                    NotificationManagerCompat.from(this).cancel(chatId.hashCode())
+                    return
+                }
+
+                // Suppress while chat is open
                 if (ForegroundTracker.getCurrentChat() == chatId) return
 
-                // Append + build history
+                val senderName     = data["senderName"] ?: data["title"] ?: "New message"
+                val text           = data["text"] ?: data["body"] ?: ""
+                val senderPhotoUrl = data["senderPhotoUrl"]
+
+                // Build/update local history for MessagingStyle
                 val now = System.currentTimeMillis()
                 NotificationsStore.appendMessage(this, chatId, senderName, text, now)
                 val history = NotificationsStore.history(this, chatId)
 
-                val open = PendingIntent.getActivity(
+                val open = android.app.PendingIntent.getActivity(
                     this, chatId.hashCode(),
                     Intent(this, ChatActivity::class.java)
                         .putExtra("chatId", chatId)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
                 )
 
-                // Build MessagingStyle without using RestrictedApi setters
-                val me = Person.Builder()
+                val me: Person = Person.Builder()
                     .setName(user.displayName ?: user.email ?: "Me")
                     .build()
 
-                val style = NotificationCompat.MessagingStyle(me)
-                for (m in history) {
-                    val sender = Person.Builder().setName(m.sender).build()
-                    val msg = NotificationCompat.MessagingStyle.Message(m.text, m.ts, sender)
-                    style.addMessage(msg)
-                }
+                // Compat MessagingStyle (typed, not Unit)
+                val style: NotificationCompat.MessagingStyle =
+                    NotificationCompat.MessagingStyle(me).also { s ->
+                        for (m in history) {
+                            val sender = Person.Builder().setName(m.sender).build()
+                            s.addMessage(
+                                NotificationCompat.MessagingStyle.Message(
+                                    m.text, m.ts, sender
+                                )
+                            )
+                        }
+                    }
 
-                val builder = NotificationHelper
-                    .builder(this, NotificationHelper.CHANNEL_MESSAGES)
+                // Compat Builder (not framework)
+                val builder = NotificationCompat.Builder(this, NotificationHelper.CHANNEL_MESSAGES)
                     .setSmallIcon(R.drawable.ic_message)
-                    .setContentTitle(senderName) // title here instead of conversationTitle
+                    .setContentTitle(senderName)
                     .setStyle(style)
                     .setContentIntent(open)
                     .setAutoCancel(true)
@@ -96,50 +148,44 @@ class PushService : FirebaseMessagingService() {
                     .setGroup("chat_$chatId")
 
                 if (!senderPhotoUrl.isNullOrBlank()) {
-                    CoroutineScope(Dispatchers.IO).launch {
+                    scope.launch {
                         try { loadBitmap(senderPhotoUrl)?.let { builder.setLargeIcon(it) } } catch (_: Exception) {}
-                        NotificationManagerCompat.from(this@PushService).notify(chatId.hashCode(), builder.build())
+                        NotificationManagerCompat.from(this@PushService)
+                            .notify(chatId.hashCode(), builder.build())
                     }
                 } else {
-                    NotificationManagerCompat.from(this).notify(chatId.hashCode(), builder.build())
+                    NotificationManagerCompat.from(this)
+                        .notify(chatId.hashCode(), builder.build())
                 }
             }
 
-            // ----------------------------- CALLS -----------------------------
+            // ---------------- CALLS ----------------
             "incoming_call" -> {
-                if (!prefs.callNotificationsEnabled) return   // ✅ per-channel gate
+                if (!prefs.callNotificationsEnabled) return
 
-                val callId = data["callId"] ?: return
-                val callerId = data["callerId"] ?: return
+                val callId     = data["callId"] ?: return
+                val callerId   = data["callerId"] ?: return
                 val callerName = data["callerDisplayName"] ?: "Incoming call"
 
-                val full = PendingIntent.getActivity(
+                val full = android.app.PendingIntent.getActivity(
                     this, callId.hashCode(),
                     Intent(this, IncomingCallActivity::class.java)
                         .putExtra("callId", callId)
                         .putExtra("callerId", callerId)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
                 )
 
-                // Activity-based intents for actions to avoid BroadcastReceiver launch issues
-                val accept = PendingIntent.getActivity(
+                val accept = android.app.PendingIntent.getActivity(
                     this, ("acc_$callId").hashCode(),
                     Intent(this, CallActionActivity::class.java)
                         .putExtra(CallActionActivity.EXTRA_ACTION, CallActionActivity.ACTION_ACCEPT)
                         .putExtra(CallActionActivity.EXTRA_CALL_ID, callId)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
                 )
 
-                val decline = PendingIntent.getActivity(
-                    this, ("dec_$callId").hashCode(),
-                    Intent(this, CallActionActivity::class.java)
-                        .putExtra(CallActionActivity.EXTRA_ACTION, CallActionActivity.ACTION_DECLINE)
-                        .putExtra(CallActionActivity.EXTRA_CALL_ID, callId)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
+                val decline = android.app.PendingIntent.getActivity( this, ("dec_$callId").hashCode(), Intent(this, CallActionActivity::class.java) .putExtra(CallActionActivity.EXTRA_ACTION, CallActionActivity.ACTION_DECLINE) .putExtra(CallActionActivity.EXTRA_CALL_ID, callId) .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP), android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE )
 
                 val notif = NotificationCompat.Builder(this, NotificationHelper.CHANNEL_CALLS)
                     .setSmallIcon(R.drawable.ic_call)
@@ -159,7 +205,6 @@ class PushService : FirebaseMessagingService() {
                 NotificationManagerCompat.from(this).notify(CALL_NOTIF_ID, notif)
             }
 
-            // Auto-cancel ring when status changes elsewhere
             "call_update" -> {
                 val status = data["status"] ?: return
                 if (status != "ringing") {
@@ -169,6 +214,7 @@ class PushService : FirebaseMessagingService() {
         }
     }
 
+    // Run inside coroutine when used (we call it from scope.launch)
     private suspend fun loadBitmap(url: String): Bitmap? {
         val loader = ImageLoader(this)
         val request = ImageRequest.Builder(this)

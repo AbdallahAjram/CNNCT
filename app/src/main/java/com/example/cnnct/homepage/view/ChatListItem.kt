@@ -15,6 +15,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.cnnct.R
 import com.example.cnnct.common.view.UserAvatar
 import com.example.cnnct.homepage.model.ChatSummary
 import java.text.SimpleDateFormat
@@ -131,10 +132,18 @@ fun ChatListItem(
                     modifier = Modifier.size(48.dp),
                     contentAlignment = Alignment.BottomEnd
                 ) {
+                    // ✅ Use different fallbacks for group vs private
+                    val fallbackRes = if (chatSummary.type == "group") {
+                        R.drawable.defaultgpp
+                    } else {
+                        R.drawable.defaultpp
+                    }
+
                     UserAvatar(
                         photoUrl = photoUrl,
                         size = 48.dp,
-                        contentDescription = "Avatar"
+                        contentDescription = "Avatar",
+                        fallbackRes = fallbackRes
                     )
                     Box(
                         modifier = Modifier
@@ -161,7 +170,7 @@ fun ChatListItem(
                             overflow = TextOverflow.Ellipsis
                         )
 
-                        // NEW: tiny bell-off if muted
+                        // tiny bell-off if muted
                         if (muted) {
                             Icon(
                                 imageVector = Icons.Filled.NotificationsOff,

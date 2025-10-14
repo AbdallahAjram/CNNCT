@@ -3,6 +3,7 @@ package com.example.cnnct.homepage.controller
 import android.util.Log
 import com.example.cnnct.homepage.model.ChatSummary
 import com.google.android.gms.tasks.Tasks
+import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.*
 import com.google.firebase.firestore.SetOptions
@@ -13,31 +14,87 @@ object HomePController {
     private val db = FirebaseFirestore.getInstance()
     private val auth = FirebaseAuth.getInstance()
 
-    // ---------------- Real-time: listen directly to /chats ----------------
+    // ---------------- Real-time: listen to /chats + user-clears ----------------
+    /**
+     * Emits your chats, but with per-chat "clear for me" applied:
+     * if userChats/{me}/chats/{chatId}.clearedBefore >= lastMessageTimestamp,
+     * we blank the preview (text/timestamp/sender/status).
+     */
     fun listenMyChats(
         onResult: (List<ChatSummary>) -> Unit
     ): ListenerRegistration? {
         val uid = auth.currentUser?.uid ?: return null
-        return db.collection("chats")
+
+        // We combine two listeners:
+        //  - chats where I'm a member
+        //  - my per-chat meta (clearedBefore)
+        var chats: List<ChatSummary> = emptyList()
+        var clearedMap: Map<String, Timestamp> = emptyMap()
+
+        fun emit() {
+            val masked = chats.map { applyClearMask(it, clearedMap[it.id]) }
+            onResult(sortChats(masked))
+        }
+
+        val chatsReg = db.collection("chats")
             .whereArrayContains("members", uid)
             .addSnapshotListener { snap, err ->
                 if (err != null) {
-                    Log.e("HomePController", "listenMyChats error", err)
+                    Log.e("HomePController", "listenMyChats(chats) error", err)
                     onResult(emptyList()); return@addSnapshotListener
                 }
-                val list = snap?.documents?.mapNotNull { toChatSummary(it, uid) } ?: emptyList()
-                onResult(sortChats(list))
+                chats = snap?.documents?.mapNotNull { toChatSummary(it, uid) } ?: emptyList()
+                emit()
             }
+
+        val clearsReg = db.collection("userChats").document(uid)
+            .collection("chats")
+            .addSnapshotListener { snap, err ->
+                if (err != null) {
+                    Log.w("HomePController", "listenMyChats(clears) error", err)
+                    return@addSnapshotListener
+                }
+                val map = mutableMapOf<String, Timestamp>()
+                snap?.documents?.forEach { d ->
+                    (d.getTimestamp("clearedBefore"))?.let { map[d.id] = it }
+                }
+                clearedMap = map
+                emit()
+            }
+
+        // Return a handle that removes both
+        return object : ListenerRegistration {
+            override fun remove() {
+                try { chatsReg.remove() } catch (_: Exception) {}
+                try { clearsReg.remove() } catch (_: Exception) {}
+            }
+        }
     }
 
     fun getMyChats(onResult: (List<ChatSummary>) -> Unit) {
         val uid = auth.currentUser?.uid ?: return onResult(emptyList())
-        db.collection("chats")
+
+        // Fetch /chats and /userChats in parallel, then combine
+        val chatsTask = db.collection("chats")
             .whereArrayContains("members", uid)
             .get()
-            .addOnSuccessListener { snap ->
-                val list = snap.documents.mapNotNull { toChatSummary(it, uid) }
-                onResult(sortChats(list))
+
+        val clearsTask = db.collection("userChats").document(uid)
+            .collection("chats").get()
+
+        Tasks.whenAllSuccess<QuerySnapshot>(listOf(chatsTask, clearsTask))
+            .addOnSuccessListener { results ->
+                val chatsSnap = results[0]
+                val clearsSnap = results[1]
+
+                val chats = chatsSnap.documents.mapNotNull { toChatSummary(it, uid) }
+
+                val clearedMap = clearsSnap.documents
+                    .mapNotNull { d -> d.getTimestamp("clearedBefore")?.let { d.id to it } }
+                    .toMap()
+
+                val masked = chats.map { applyClearMask(it, clearedMap[it.id]) }
+                onResult(sortChats(masked))
             }
             .addOnFailureListener { e ->
                 Log.e("HomePController", "getMyChats failed", e)
@@ -56,6 +113,27 @@ object HomePController {
         }
     }
 
+    /**
+     * If the user's clearedBefore is newer than (or equal to) the last message time,
+     * we blank the preview fields so the Home UI shows "No messages yet".
+     */
+    private fun applyClearMask(s: ChatSummary, clearedBefore: Timestamp?): ChatSummary {
+        if (clearedBefore == null) return s
+        val lastMs = s.lastMessageTimestamp?.toDate()?.time ?: Long.MIN_VALUE
+        val clearedMs = clearedBefore.toDate().time
+        return if (lastMs <= clearedMs) {
+            s.copy(
+                lastMessageText = "",
+                lastMessageTimestamp = null,
+                lastMessageSenderId = null,
+                lastMessageIsRead = false,
+                lastMessageStatus = null
+            )
+        } else {
+            s
+        }
+    }
+
     // NOTE: aware of memberMeta → iBlockedPeer / blockedByOther (for *me*)
     private fun toChatSummary(meta: DocumentSnapshot, me: String): ChatSummary? {
         return try {
@@ -71,7 +149,6 @@ object HomePController {
             val isReadLegacy = meta.getBoolean("lastMessageIsRead") ?: false
             val status = statusRaw ?: if (isReadLegacy) "read" else null
 
-            // my-side block flags from memberMeta
             val memberMeta = meta.get("memberMeta") as? Map<*, *>
             val myMeta = (memberMeta?.get(me) as? Map<*, *>)
             val iBlockedPeer = (myMeta?.get("iBlockedPeer") as? Boolean)
@@ -90,7 +167,8 @@ object HomePController {
                 updatedAt = meta.getTimestamp("updatedAt"),
                 lastMessageStatus = status,
                 iBlockedPeer = iBlockedPeer,
-                blockedByOther = blockedByOther
+                blockedByOther = blockedByOther,
+                groupPhotoUrl = meta.getString("groupPhotoUrl")
             )
         } catch (e: Exception) {
             Log.e("HomePController", "toChatSummary parse ${meta.id}", e); null
@@ -257,8 +335,8 @@ object HomePController {
             if (!lastSender.isNullOrBlank() && lastSender != me) {
                 tx.update(ref, mapOf(
                     "lastMessageStatus" to "read",
-                    "lastMessageIsRead" to true,
-                    "updatedAt" to com.google.firebase.Timestamp.now()
+                    "updatedAt" to com.google.firebase.Timestamp.now(),
+                    "lastMessageIsRead" to true
                 ))
             }
         }
@@ -283,8 +361,8 @@ object HomePController {
                         "type" to "private",
                         "members" to listOf(me, other),
                         "pairKey" to pairKey,
-                        "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
-                        "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
                     )
                     ref.set(data)
                         .addOnSuccessListener { onResult(chatId) }
@@ -300,7 +378,7 @@ object HomePController {
             }
     }
 
-    // ---------------- Per-chat mute helpers (under /userChats/{me}/chats/{chatId}) ----------------
+    // ---------------- Per-chat mute helpers ----------------
     suspend fun setChatMutedUntil(me: String, chatId: String, mutedUntilMs: Long?) {
         val ref = db.collection("userChats").document(me)
             .collection("chats").document(chatId)
@@ -308,7 +386,6 @@ object HomePController {
         val data = if (mutedUntilMs == null) {
             mapOf("mutedUntil" to FieldValue.delete())
         } else {
-            // Timestamp(seconds, nanoseconds)
             mapOf("mutedUntil" to com.google.firebase.Timestamp(mutedUntilMs / 1000, ((mutedUntilMs % 1000).toInt()) * 1_000_000))
         }
 

@@ -84,16 +84,13 @@ fun HomeScreen(callsController: CallsController, onLogout: () -> Unit) {
 
         // start mute sync
         MuteStore.start()
-        val listener: () -> Unit = { muteVersion++ }   // ✅ FIXED
+        val listener: () -> Unit = { muteVersion++ }   // ✅ keeps list reacting to mute changes
         MuteStore.addListener(listener)
 
         onDispose {
             MuteStore.removeListener(listener)
-            // Do NOT stop() here if other screens also rely on mute state;
-            // if you want to stop only on app exit, call MuteStore.stop() in a top-level Activity onDestroy.
         }
     }
-
 
     // ===== Selection state =====
     var selectionMode by remember { mutableStateOf(false) }
@@ -586,7 +583,13 @@ fun ChatListView(
         LazyColumn {
             items(filtered, key = { it.id }) { chat ->
                 val other = if (chat.type == "private") chat.members.firstOrNull { it != currentUserId } else null
-                val photoUrlForRow = if (other != null) userPhotoMap[other] else null
+
+                // ✅ choose the correct photo URL to pass down
+                val photoUrlForRow: String? = when (chat.type) {
+                    "private" -> other?.let { userPhotoMap[it] }
+                    "group" -> chat.groupPhotoUrl
+                    else -> null
+                }
 
                 // 🔴 blocked indicator logic
                 val blockedForMe = (other != null && blockedPeers.contains(other)) ||
@@ -610,10 +613,10 @@ fun ChatListView(
                         onClick = null,
                         onlineMap = onlineMap,
                         blockedUserIds = blockedSetForRow,
-                        photoUrl = photoUrlForRow,
+                        photoUrl = photoUrlForRow,      // ✅ use groupPhotoUrl when group
                         selectionMode = selectionMode,
                         selected = isSelected(chat.id),
-                        muted = isMuted(chat.id)  // 👈 NEW
+                        muted = isMuted(chat.id)
                     )
                 }
             }

@@ -57,7 +57,7 @@ class FirestoreChatRepository(
                 mapOf(
                     "type" to "private",
                     "members" to listOf(userA, userB),
-                    "pairKey" to pairKey,              // ✅ include pairKey to satisfy rules
+                    "pairKey" to pairKey,              // include pairKey to satisfy rules
                     "createdAt" to now,
                     "updatedAt" to now,
                     "lastMessageText" to "",
@@ -76,14 +76,15 @@ class FirestoreChatRepository(
         senderId: String,
         draft: MessageDraft
     ) {
-        // Guard: if I blocked the peer, no-op (smoother UX than letting rules 403)
-        // Note: we can only check *my* block list client-side.
+        // 🔐 Only check "I blocked peer" for PRIVATE chats
         val chatSnap = chats().document(chatId).get().await()
-        val members = (chatSnap.get("members") as? List<String>).orEmpty()
-        val peerId = members.firstOrNull { it != senderId }
-        if (peerId != null && iBlockedPeer(senderId, peerId)) {
-            // silently ignore or throw? We choose to throw so UI can show a banner/toast if desired
-            throw IllegalStateException("You blocked this user")
+        val type = chatSnap.getString("type") ?: "private"
+        if (type == "private") {
+            val members = (chatSnap.get("members") as? List<String>).orEmpty()
+            val peerId = members.firstOrNull { it != senderId }
+            if (peerId != null && iBlockedPeer(senderId, peerId)) {
+                throw IllegalStateException("You blocked this user")
+            }
         }
 
         val chatRef = chats().document(chatId)
@@ -227,7 +228,6 @@ class FirestoreChatRepository(
         ).await()
     }
 
-    // ======= Preview helper for controller =======
     override suspend fun updateUserPreview(ownerUserId: String, chatId: String, latest: Message?) {
         val ts = latest?.createdAt ?: latest?.createdAtClient
         val previewText: String? = when {
@@ -382,7 +382,7 @@ class FirestoreChatRepository(
 
     override suspend fun deleteForMe(chatId: String, messageId: String, userId: String) {
         messages(chatId).document(messageId).update(
-            mapOf("hiddenFor" to FieldValue.arrayUnion(userId))
+            mapOf("hiddenFor" to com.google.firebase.firestore.FieldValue.arrayUnion(userId))
         ).await()
     }
 

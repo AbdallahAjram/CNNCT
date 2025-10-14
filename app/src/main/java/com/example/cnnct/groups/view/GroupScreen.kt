@@ -1,12 +1,18 @@
 package com.example.cnnct.groups.view
 
 import android.content.Intent
+import android.net.Uri
 import android.util.Log
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
@@ -15,11 +21,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil.compose.rememberAsyncImagePainter
+import com.example.cnnct.R
 import com.example.cnnct.common.view.UserAvatar
+import com.example.cnnct.groups.controller.GroupController
 import com.example.cnnct.homepage.controller.HomePController
 import com.example.cnnct.homepage.controller.PreloadedChatsCache
 import com.example.cnnct.homepage.model.ChatSummary
@@ -29,12 +41,14 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// ---- Optional: batch names fetcher (stub) ----
+/* ---------------- UsersController (displayName fetch, chunked) ---------------- */
+
 object UsersController {
     fun getDisplayNames(
         uids: Set<String>,
@@ -43,8 +57,6 @@ object UsersController {
         if (uids.isEmpty()) { onResult(emptyMap()); return }
         val db = FirebaseFirestore.getInstance()
         val acc = mutableMapOf<String, String>()
-
-        // Firestore whereIn caps at 10; chunk it
         val chunks = uids.toList().chunked(10)
         var remaining = chunks.size
         for (chunk in chunks) {
@@ -65,37 +77,49 @@ object UsersController {
     }
 }
 
+/* ------------------------ Create Group Sheet state ------------------------ */
+
+private data class SelectableUser(
+    val uid: String,
+    val name: String,
+    val phone: String? = null,
+    var selected: Boolean = false
+)
+
+/* ------------------------ Screen ------------------------ */
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GroupScreen() {
-    // --- state
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    // State
     var searchQuery by remember { mutableStateOf("") }
     var chatSummaries by remember { mutableStateOf<List<ChatSummary>>(emptyList()) }
     var userMap by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
 
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
-    val context = LocalContext.current
     val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    // ---- 1) warm start from cache (instant paint)
+    // Create group sheet visibility
+    var showCreate by remember { mutableStateOf(false) }
+
+    // 1) Warm from cache
     LaunchedEffect(Unit) {
         PreloadedChatsCache.chatSummaries?.let { cached ->
             val groups = cached.filter { it.type == "group" }
             chatSummaries = groups.sortedByDescending { it.lastMessageTimestamp?.toDate()?.time ?: 0L }
 
             val ids = buildSet {
-                groups.forEach { c ->
-                    c.members?.forEach { add(it) }
-                    c.lastMessageSenderId?.let { add(it) }
-                }
+                groups.forEach { c -> c.members.forEach { add(it) }; c.lastMessageSenderId?.let { add(it) } }
                 remove(currentUserId)
             }
             if (ids.isNotEmpty()) {
                 UsersController.getDisplayNames(ids) { userMap = it }
             }
         } ?: run {
-            // If nothing cached (cold start), fetch once so UI isn't empty while listener attaches
             withContext(Dispatchers.IO) {
                 HomePController.getUserChats { fetched ->
                     val groups = fetched.filter { it.type == "group" }
@@ -106,8 +130,9 @@ fun GroupScreen() {
         }
     }
 
-    // ---- 2) realtime listener (keeps list live)
+    // 2) Realtime listener
     DisposableEffect(currentUserId) {
+        if (currentUserId.isBlank()) return@DisposableEffect onDispose { }
         val db = FirebaseFirestore.getInstance()
         val query = db.collection("chats")
             .whereEqualTo("type", "group")
@@ -121,23 +146,16 @@ fun GroupScreen() {
             if (snap == null) return@addSnapshotListener
 
             val groups = snap.documents.mapNotNull { doc ->
-                // Map to your ChatSummary and copy the doc id (assumes ChatSummary has id: String)
-                doc.toObject(ChatSummary::class.java)?.copy(id = doc.id)
+                doc.toObject(ChatSummary::class.java)?.apply { id = doc.id }
             }.sortedByDescending { it.lastMessageTimestamp?.toDate()?.time ?: 0L }
 
             chatSummaries = groups
-
-            // merge back into global cache so the rest of the app is warm
             val existing = PreloadedChatsCache.chatSummaries ?: emptyList()
             val merged = (existing.filter { it.type != "group" } + groups)
             PreloadedChatsCache.chatSummaries = merged
 
-            // refresh names for any new uids
             val ids = buildSet {
-                groups.forEach { c ->
-                    c.members?.forEach { add(it) }
-                    c.lastMessageSenderId?.let { add(it) }
-                }
+                groups.forEach { c -> c.members.forEach { add(it) }; c.lastMessageSenderId?.let { add(it) } }
                 remove(currentUserId)
             }
             if (ids.isNotEmpty()) {
@@ -147,20 +165,36 @@ fun GroupScreen() {
         onDispose { reg.remove() }
     }
 
-    // ---- UI
+    // ---------------- UI ----------------
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Groups") },
-                actions = {
-                    IconButton(onClick = {
-                        focusRequester.requestFocus()
-                        keyboardController?.show()
-                    }) {
-                        Icon(Icons.Default.Search, contentDescription = "Search")
+                title = {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Image(
+                            painter = painterResource(R.drawable.logo2),
+                            contentDescription = null,
+                            modifier = Modifier.height(40.dp)
+                        )
+                        Text(text = "Groups", style = MaterialTheme.typography.titleLarge)
+                        IconButton(onClick = {
+                            focusRequester.requestFocus()
+                            keyboardController?.show()
+                        }) {
+                            Icon(Icons.Default.Search, contentDescription = "Search")
+                        }
                     }
                 }
             )
+        },
+        floatingActionButton = {
+            FloatingActionButton(onClick = { showCreate = true }) {
+                Icon(Icons.Default.Add, contentDescription = "Create group")
+            }
         },
         bottomBar = { BottomNavigationBar(currentScreen = "groups") }
     ) { innerPadding ->
@@ -203,19 +237,19 @@ fun GroupScreen() {
                 }
             } else {
                 LazyColumn {
-                    itemsIndexed(filteredGroups) { _, chat ->
+                    items(filteredGroups, key = { it.id }) { chat ->
                         GroupListItem(
                             chatSummary = chat,
                             currentUserId = currentUserId,
                             userMap = userMap,
                             onClick = {
-                                val id = chat.id // ensure ChatSummary has `id: String`
+                                val id = chat.id
                                 if (id.isNotBlank()) {
                                     val intent = Intent(
                                         context,
                                         com.example.cnnct.chat.view.ChatActivity::class.java
                                     )
-                                    intent.putExtra("chatId", id) // ChatActivity only needs this
+                                    intent.putExtra("chatId", id)
                                     context.startActivity(intent)
                                 } else {
                                     Log.e("GroupScreen", "Missing id for group: ${chat.groupName}")
@@ -227,9 +261,23 @@ fun GroupScreen() {
             }
         }
     }
+
+    if (showCreate) {
+        CreateGroupSheet(
+            onDismiss = { showCreate = false },
+            onCreatedOpen = { chatId ->
+                showCreate = false
+                val intent = Intent(
+                    context,
+                    com.example.cnnct.chat.view.ChatActivity::class.java
+                ).putExtra("chatId", chatId)
+                context.startActivity(intent)
+            }
+        )
+    }
 }
 
-/* ---------- Row item with avatar ---------- */
+/* ---------------- Row item with avatar + ticks ---------------- */
 
 @Composable
 private fun GroupListItem(
@@ -239,11 +287,7 @@ private fun GroupListItem(
     onClick: () -> Unit
 ) {
     val chatName = chatSummary.groupName ?: "Group"
-
-    // If you later add a group photo URL to ChatSummary, plug it here:
-    val groupPhotoUrl: String? = null
-    // e.g., if you add `val groupPhotoUrl: String?` to ChatSummary, do:
-    // val groupPhotoUrl = chatSummary.groupPhotoUrl
+    val groupPhotoUrl: String? = chatSummary.groupPhotoUrl
 
     Card(
         modifier = Modifier
@@ -259,19 +303,16 @@ private fun GroupListItem(
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 🔹 Group avatar (dynamic when URL exists; fallback to drawable via UserAvatar)
             UserAvatar(
                 photoUrl = groupPhotoUrl,
-                // If you have a dedicated group default drawable, pass it via fallbackRes:
-                // fallbackRes = R.drawable.default_group,
                 size = 44.dp,
-                contentDescription = "Group avatar"
+                contentDescription = "Group avatar",
+                fallbackRes = R.drawable.defaultgpp // ✅ use group default
             )
 
             Spacer(Modifier.width(12.dp))
 
             Column(modifier = Modifier.weight(1f)) {
-                // Title + time
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -296,13 +337,14 @@ private fun GroupListItem(
 
                 Spacer(Modifier.height(4.dp))
 
-                // Last line + ticks
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val rawText = chatSummary.lastMessageText.takeIf { it.isNotBlank() } ?: "No messages yet"
+                    val hasText = chatSummary.lastMessageText.isNotBlank()
+                    val rawText = if (hasText) chatSummary.lastMessageText else "No messages yet"
+
                     val senderLabel: String? = when {
                         chatSummary.lastMessageSenderId.isNullOrBlank() -> null
                         chatSummary.lastMessageSenderId == currentUserId -> "You"
@@ -319,14 +361,15 @@ private fun GroupListItem(
                         modifier = Modifier.weight(1f)
                     )
 
-                    if (chatSummary.lastMessageSenderId == currentUserId && chatSummary.lastMessageText.isNotBlank()) {
+                    if (hasText && chatSummary.lastMessageSenderId == currentUserId) {
                         val effectiveStatus = chatSummary.lastMessageStatus
                             ?: if (chatSummary.lastMessageIsRead) "read" else "delivered"
+
                         val (ticks, color) = when (effectiveStatus) {
-                            "read" -> "✓✓" to MaterialTheme.colorScheme.primary
+                            "read"      -> "✓✓" to Color(0xFF34B7F1)
                             "delivered" -> "✓✓" to MaterialTheme.colorScheme.onSurfaceVariant
-                            "sent" -> "✓" to MaterialTheme.colorScheme.onSurfaceVariant
-                            else -> null to MaterialTheme.colorScheme.onSurfaceVariant
+                            "sent"      -> "✓"  to MaterialTheme.colorScheme.onSurfaceVariant
+                            else        -> null  to MaterialTheme.colorScheme.onSurfaceVariant
                         }
                         if (ticks != null) {
                             Text(
@@ -343,14 +386,267 @@ private fun GroupListItem(
     }
 }
 
-/* ---------- helpers ---------- */
+/* ---------------- Create Group Sheet ---------------- */
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CreateGroupSheet(
+    onDismiss: () -> Unit,
+    onCreatedOpen: (String) -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    val me = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+    val context = LocalContext.current
+
+    var groupName by remember { mutableStateOf("") }
+    var groupDesc by remember { mutableStateOf("") }
+    var iconUri by remember { mutableStateOf<Uri?>(null) }
+
+    // Candidates and selection
+    var candidates by remember { mutableStateOf<List<SelectableUser>>(emptyList()) }
+    var searchQuery by remember { mutableStateOf("") }
+    var searching by remember { mutableStateOf(false) }
+    var loadingPeers by remember { mutableStateOf(true) }
+    var creating by remember { mutableStateOf(false) }
+
+    // Pick image
+    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        iconUri = uri
+    }
+
+    // Load my private chat peers as defaults
+    LaunchedEffect(Unit) {
+        try {
+            loadingPeers = true
+            val peerIds = GroupController.fetchPrivateChatPeers(me)
+            val users = GroupController.fetchUsersByIds(peerIds)
+            candidates = users
+                .map { SelectableUser(uid = it.uid, name = it.displayName, phone = it.phone) }
+                .sortedBy { it.name.lowercase() }
+        } catch (e: Exception) {
+            Log.e("CreateGroupSheet", "peer load failed", e)
+        } finally {
+            loadingPeers = false
+        }
+    }
+
+    // Global search (like Home)
+    LaunchedEffect(searchQuery) {
+        val q = searchQuery.trim()
+        if (q.length < 2) return@LaunchedEffect
+        searching = true
+        try {
+            val results = GroupController.globalSearchUsers(q, limit = 20)
+            // merge into candidates list without losing existing selections
+            val existingSel = candidates.associateBy { it.uid }
+            val merged = LinkedHashMap<String, SelectableUser>()
+            // keep current candidates first
+            candidates.forEach { merged[it.uid] = it }
+            // add/merge results
+            for (u in results) {
+                val old = existingSel[u.uid]
+                merged[u.uid] = SelectableUser(
+                    uid = u.uid,
+                    name = u.displayName,
+                    phone = u.phone,
+                    selected = old?.selected == true
+                )
+            }
+            candidates = merged.values.toList().sortedBy { it.name.lowercase() }
+        } catch (e: Exception) {
+            Log.e("CreateGroupSheet", "global search failed", e)
+        } finally {
+            searching = false
+        }
+    }
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+        ) {
+            Text("Create Group", style = MaterialTheme.typography.titleLarge)
+            Spacer(Modifier.height(12.dp))
+
+            // Name
+            OutlinedTextField(
+                value = groupName,
+                onValueChange = { groupName = it },
+                label = { Text("Group name") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(8.dp))
+
+            // Description
+            OutlinedTextField(
+                value = groupDesc,
+                onValueChange = { groupDesc = it },
+                label = { Text("Description (optional)") },
+                singleLine = false,
+                minLines = 2,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(8.dp))
+
+            // Icon picker
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Group icon (optional)", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                TextButton(onClick = { pickImage.launch("image/*") }) { Text("Choose") }
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(120.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                val painter = if (iconUri != null) {
+                    rememberAsyncImagePainter(model = iconUri)
+                } else {
+                    painterResource(R.drawable.defaultgpp)
+                }
+                Image(
+                    painter = painter,
+                    contentDescription = "Group icon",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .aspectRatio(1f)
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // Search bar (global)
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Search users by name or phone…") },
+                singleLine = true,
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            // Candidates list
+            Text(
+                text = "Members (tap to select)",
+                style = MaterialTheme.typography.titleMedium
+            )
+            Spacer(Modifier.height(6.dp))
+
+            val infoLine = when {
+                loadingPeers -> "Loading your contacts…"
+                searching -> "Searching…"
+                candidates.isEmpty() -> "No candidates yet — try searching."
+                else -> null
+            }
+            if (infoLine != null) {
+                Text(infoLine, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 280.dp)
+                ) {
+                    items(candidates, key = { it.uid }) { row ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    val idx = candidates.indexOfFirst { it.uid == row.uid }
+                                    if (idx >= 0) {
+                                        val copy = candidates.toMutableList()
+                                        copy[idx] = copy[idx].copy(selected = !copy[idx].selected)
+                                        candidates = copy
+                                    }
+                                }
+                                .padding(vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = row.selected,
+                                onCheckedChange = {
+                                    val idx = candidates.indexOfFirst { it.uid == row.uid }
+                                    if (idx >= 0) {
+                                        val copy = candidates.toMutableList()
+                                        copy[idx] = copy[idx].copy(selected = it == true)
+                                        candidates = copy
+                                    }
+                                }
+                            )
+                            Column(Modifier.weight(1f)) {
+                                Text(row.name, style = MaterialTheme.typography.bodyLarge)
+                                row.phone?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                            }
+                        }
+                        Divider()
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                    enabled = !creating
+                ) { Text("Cancel") }
+
+                Button(
+                    onClick = {
+                        if (groupName.isBlank()) return@Button
+                        val selected = candidates.filter { it.selected }.map { it.uid }
+                        scope.launch {
+                            creating = true
+                            try {
+                                val chatId = GroupController.createGroup(
+                                    me = me,
+                                    name = groupName.trim(),
+                                    description = groupDesc.trim().ifBlank { null },
+                                    memberIds = selected,
+                                    localIconUri = iconUri
+                                )
+                                // success → open and let the parent close the sheet
+                                onCreatedOpen(chatId)
+                            } catch (e: Exception) {
+                                android.util.Log.e("CreateGroupSheet", "createGroup failed", e)
+                                Toast.makeText(
+                                    context,
+                                    "Create failed: ${e.message ?: "unknown error"}",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            } finally {
+                                creating = false
+                            }
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    enabled = groupName.isNotBlank() && !creating
+                ) { Text(if (creating) "Creating…" else "Create") }
+            }
+
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+/* ---------------- helpers ---------------- */
 
 private fun formatTimestamp(ts: Timestamp): String {
     val date = ts.toDate()
     val now = Date()
     val diff = now.time - date.time
     val dayMs = 24 * 60 * 60 * 1000
-
     val fmt = when {
         diff < dayMs -> SimpleDateFormat("h:mm a", Locale.getDefault())
         diff < 7 * dayMs -> SimpleDateFormat("EEE", Locale.getDefault())

@@ -129,5 +129,9 @@
             android:exported="false"
             android:launchMode="singleTop" />
 
+        <activity android:name=".chat.view.PersonInfoActivity" android:exported="false"/>
+        <activity android:name=".chat.view.GroupInfoActivity" android:exported="false"/>
+
+
     </application>
 </manifest>

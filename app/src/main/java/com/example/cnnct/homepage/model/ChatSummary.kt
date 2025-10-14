@@ -1,20 +1,31 @@
 // file: com/example/cnnct/homepage/model/ChatSummary.kt
 package com.example.cnnct.homepage.model
 
+import androidx.annotation.Keep
 import com.google.firebase.Timestamp
+import com.google.firebase.firestore.IgnoreExtraProperties
 
+@Keep
+@IgnoreExtraProperties
 data class ChatSummary(
-    val id: String,
-    val groupName: String? = null,
-    val lastMessageText: String = "",
-    val lastMessageTimestamp: Timestamp? = null,
-    val lastMessageSenderId: String? = null,
-    val members: List<String> = emptyList(),
-    val lastMessageIsRead: Boolean = false,
-    val type: String = "private",
-    val createdAt: Timestamp? = null,
-    val updatedAt: Timestamp? = null,
-    val lastMessageStatus: String? = null,
-    val iBlockedPeer: Boolean? = null,
-    val blockedByOther: Boolean? = null
+    var id: String = "",                 // will be filled from doc.id
+
+    var groupName: String? = null,
+    var lastMessageText: String = "",
+    var lastMessageTimestamp: Timestamp? = null,
+    var lastMessageSenderId: String? = null,
+    var members: List<String> = emptyList(),
+    var lastMessageIsRead: Boolean = false,
+    var type: String = "private",
+
+    var createdAt: Timestamp? = null,
+    var updatedAt: Timestamp? = null,
+    var lastMessageStatus: String? = null,
+
+    // optional flags you had
+    var iBlockedPeer: Boolean? = null,
+    var blockedByOther: Boolean? = null,
+
+    // (optional, future-proof)
+    var groupPhotoUrl: String? = null
 )

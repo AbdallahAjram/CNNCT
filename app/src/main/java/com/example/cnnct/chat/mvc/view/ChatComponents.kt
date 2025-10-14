@@ -1,12 +1,13 @@
 package com.cnnct.chat.mvc.view
 
+import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.AttachFile
@@ -25,6 +26,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.rounded.Call
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.style.TextOverflow
 import com.example.cnnct.common.view.UserAvatar
 
 /* ===== Presence ===== */
@@ -59,47 +66,98 @@ fun SelectionTopBar(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun TopBar(
     title: String,
     subtitle: String?,
     presence: Presence,
-    photoUrl: String? = null,
+    photoUrl: String?,
     onBack: () -> Unit,
-    onCallClick: () -> Unit
+    onCallClick: () -> Unit,
+    onHeaderClick: () -> Unit,
+
+    // NEW: to decide which actions to show
+    chatType: String = "private",
+
+    // NEW: menu callbacks (can be simple toasts if you want)
+    onSearch: (() -> Unit)? = null,
+    onClearChat: (() -> Unit)? = null,
+    onBlockPeer: (() -> Unit)? = null,   // only for private
+    onLeaveGroup: (() -> Unit)? = null   // only for group
 ) {
+    var menuOpen by remember { mutableStateOf(false) }
+
     TopAppBar(
         navigationIcon = {
             IconButton(onClick = onBack) {
-                Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
         },
         title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                AvatarWithStatus(size = 36.dp, presence = presence, photoUrl = photoUrl)
-                Spacer(Modifier.width(8.dp))
-                Column {
-                    Text(text = title, style = MaterialTheme.typography.titleMedium)
-                    if (subtitle != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onHeaderClick() },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                AvatarWithStatus(size = 42.dp, presence = presence, photoUrl = photoUrl)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (!subtitle.isNullOrBlank()) {
                         Text(
                             text = subtitle,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
             }
         },
         actions = {
-            IconButton(onClick = onCallClick) {
-                Icon(Icons.Filled.Call, contentDescription = "Voice call")
+            // Show call icon only on private chats
+            if (chatType == "private") {
+                IconButton(onClick = onCallClick) {
+                    Icon(Icons.Rounded.Call, contentDescription = "Call")
+                }
+            }
+            // 3-dots menu
+            IconButton(onClick = { menuOpen = true }) {
+                Icon(Icons.Rounded.MoreVert, contentDescription = "More")
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                if (onSearch != null) {
+                    DropdownMenuItem(text = { Text("Search") }, onClick = {
+                        menuOpen = false; onSearch()
+                    })
+                }
+                if (onClearChat != null) {
+                    DropdownMenuItem(text = { Text("Clear chat") }, onClick = {
+                        menuOpen = false; onClearChat()
+                    })
+                }
+                if (chatType == "private" && onBlockPeer != null) {
+                    DropdownMenuItem(text = { Text("Block") }, onClick = {
+                        menuOpen = false; onBlockPeer()
+                    })
+                }
+                if (chatType == "group" && onLeaveGroup != null) {
+                    DropdownMenuItem(text = { Text("Leave group") }, onClick = {
+                        menuOpen = false; onLeaveGroup()
+                    })
+                }
             }
         }
     )
 }
-
-/* ===== Small components ===== */
 
 @Composable
 fun AvatarWithStatus(
@@ -187,7 +245,7 @@ fun MessageInput(
     onSend: (String) -> Unit,
     onAttach: (() -> Unit)? = null
 ) {
-    var text = remember { mutableStateOf("") }
+    val text = remember { mutableStateOf("") }
     val canSend = text.value.isNotBlank()
     val keyboard = LocalSoftwareKeyboardController.current
 

@@ -9,6 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.imePadding
@@ -26,10 +27,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cnnct.chat.mvc.controller.ChatController
 import com.cnnct.chat.mvc.model.Message
 import com.cnnct.chat.mvc.model.MessageType
+import com.example.cnnct.chat.view.GroupInfoActivity
+import com.example.cnnct.chat.view.PersonInfoActivity
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -47,11 +51,10 @@ fun ChatScreen(
     title: String = "Chat",
     subtitle: String? = null,
 
-    // mapping helpers (✅ explicit types, with safe defaults)
     nameOf: (String) -> String = { it },
-    userPhotoOf: (String) -> String? = { null },   // resolver for per-sender photo
-    headerPhotoUrl: String? = null,                // explicit header photo (if provided by caller)
-    groupPhotoUrl: String? = null,                 // optional header image for groups
+    userPhotoOf: (String) -> String? = { null },
+    headerPhotoUrl: String? = null,
+    groupPhotoUrl: String? = null,
 
     otherUserId: String? = null,
     otherLastReadId: String? = null,
@@ -59,51 +62,60 @@ fun ChatScreen(
     memberIds: List<String> = emptyList(),
     memberMeta: Map<String, Any>? = null,
 
-    // Block UI/behavior flags
-    iBlockedPeer: Boolean = false,    // I blocked the peer
-    blockedByOther: Boolean = false,  // peer blocked me (mirrored via memberMeta)
+    iBlockedPeer: Boolean = false,
+    blockedByOther: Boolean = false,
+
+    // NEW: timestamp after which messages are visible (per-user clear)
+    clearedBeforeMs: Long? = null,
 
     blockedUserIds: Set<String> = emptySet(),
     onlineMap: Map<String, Long?> = emptyMap(),
     onBack: () -> Unit = {},
-    onCallClick: () -> Unit = {}
+    onCallClick: () -> Unit = {},
+
+    // NEW: header tap + 3-dots menu callbacks (nullable; we provide toast fallbacks)
+    onHeaderClick: () -> Unit = {},
+    onSearch: (() -> Unit)? = null,
+    onClearChat: (() -> Unit)? = null,
+    onBlockPeer: (() -> Unit)? = null,  // private only
+    onLeaveGroup: (() -> Unit)? = null  // group only
 ) {
     val ctx = LocalContext.current
     val messagesRaw by controller.messages.collectAsState()
     val listState = rememberLazyListState()
 
-    // remove hidden-for-me
-    val messages = remember(messagesRaw, currentUserId) {
-        messagesRaw.filter { m -> m.hiddenFor?.contains(currentUserId) != true }
+    // Hide messages that are "for me" cleared: only show items with time >= clearedBeforeMs
+    val messages = remember(messagesRaw, currentUserId, clearedBeforeMs) {
+        messagesRaw.filter { m ->
+            // hidden-for-me
+            val hiddenOk = m.hiddenFor?.contains(currentUserId) != true
+            // cleared filter
+            val sentTime = m.createdAt?.toDate()?.time ?: m.createdAtClient?.toDate()?.time
+            val clearOk = clearedBeforeMs?.let { cutoff ->
+                // if timestamp missing, keep it (defensive), else compare
+                sentTime == null || sentTime >= cutoff
+            } ?: true
+            hiddenOk && clearOk
+        }
     }
 
-    // selection
     val selected = remember { mutableStateListOf<String>() }
     val inSelection by remember(selected) { derivedStateOf { selected.isNotEmpty() } }
     fun toggleSelect(id: String) { if (selected.contains(id)) selected.remove(id) else selected.add(id) }
     fun clearSelection() = selected.clear()
 
-    // edit
     var editTargetId by remember { mutableStateOf<String?>(null) }
     var editText by remember { mutableStateOf("") }
-
-    // delete dialog
     var showDeleteDialog by remember { mutableStateOf(false) }
-
-    // attach chooser
     var showAttachDialog by remember { mutableStateOf(false) }
 
-    // media viewer
     data class ViewMedia(val url: String, val name: String?)
     var viewer by remember { mutableStateOf<ViewMedia?>(null) }
 
-    /* ===== pickers ===== */
     val pickMedia = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia()
     ) { uris ->
-        if (uris.isNotEmpty()) {
-            controller.sendAttachments(chatId, currentUserId, uris, ctx.contentResolver)
-        }
+        if (uris.isNotEmpty()) controller.sendAttachments(chatId, currentUserId, uris, ctx.contentResolver)
     }
 
     val pickDocuments = rememberLauncherForActivityResult(
@@ -112,10 +124,7 @@ fun ChatScreen(
         if (uris.isNotEmpty()) {
             uris.forEach { u ->
                 try {
-                    ctx.contentResolver.takePersistableUriPermission(
-                        u,
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    )
+                    ctx.contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 } catch (_: SecurityException) {}
             }
             controller.sendAttachments(chatId, currentUserId, uris, ctx.contentResolver)
@@ -130,7 +139,6 @@ fun ChatScreen(
         )
     }
 
-    // member meta helpers
     fun metaOf(uid: String): Map<*, *>? = (memberMeta as? Map<*, *>)?.get(uid) as? Map<*, *>
     fun openedAtMs(uid: String): Long? =
         (metaOf(uid)?.get("lastOpenedAt") as? com.google.firebase.Timestamp)?.toDate()?.time
@@ -140,7 +148,6 @@ fun ChatScreen(
         return m.createdAt?.toDate()?.time ?: m.createdAtClient?.toDate()?.time
     }
 
-    // presence
     fun presenceFor(uid: String?): Presence {
         if (uid == null) return Presence.Offline
         if (blockedUserIds.contains(uid)) return Presence.Blocked
@@ -150,7 +157,6 @@ fun ChatScreen(
             Presence.Online else Presence.Offline
     }
 
-    // lifecycle
     DisposableEffect(chatId) {
         controller.openChat(chatId)
         onDispose { controller.stop() }
@@ -170,7 +176,6 @@ fun ChatScreen(
         }
     }
 
-    // day labels
     val zone = remember { ZoneId.systemDefault() }
     fun dateOf(ms: Long): LocalDate = Instant.ofEpochMilli(ms).atZone(zone).toLocalDate()
     fun dayLabel(ms: Long): String {
@@ -183,12 +188,10 @@ fun ChatScreen(
         }
     }
 
-    // header presence + photo (use provided headerPhotoUrl if non-null, else derive)
     val headerPresence = if (chatType == "private") presenceFor(otherUserId) else Presence.Offline
     val resolvedHeaderPhoto = headerPhotoUrl
         ?: if (chatType == "private") userPhotoOf(otherUserId ?: "") else groupPhotoUrl
 
-    // delete eligibility
     val eligibility by remember(selected, messages, currentUserId) {
         derivedStateOf { computeDeleteEligibility(messages, selected, currentUserId) }
     }
@@ -214,13 +217,40 @@ fun ChatScreen(
                     onDeleteClick = { showDeleteDialog = true }
                 )
             } else {
+                // Build default (toast) handlers if caller didn't pass any
+                val doSearch = onSearch ?: { Toast.makeText(ctx, "Search (placeholder)", Toast.LENGTH_SHORT).show() }
+                val doClear = onClearChat ?: { Toast.makeText(ctx, "Clear chat (placeholder)", Toast.LENGTH_SHORT).show() }
+                val doBlock = onBlockPeer ?: { Toast.makeText(ctx, "Block (placeholder)", Toast.LENGTH_SHORT).show() }
+                val doLeave = onLeaveGroup ?: { Toast.makeText(ctx, "Leave group (placeholder)", Toast.LENGTH_SHORT).show() }
+
                 TopBar(
                     title = title,
                     subtitle = subtitle,
                     presence = headerPresence,
                     photoUrl = resolvedHeaderPhoto,
                     onBack = onBack,
-                    onCallClick = onCallClick
+                    onCallClick = onCallClick,
+                    onHeaderClick = {
+                        // Open info screen based on chat type
+                        if (chatType == "private" && otherUserId != null) {
+                            ctx.startActivity(
+                                Intent(ctx, PersonInfoActivity::class.java)
+                                    .putExtra("uid", otherUserId)
+                            )
+                        } else if (chatType == "group") {
+                            ctx.startActivity(
+                                Intent(ctx, GroupInfoActivity::class.java)
+                                    .putExtra("chatId", chatId)
+                            )
+                        }
+                        // also allow external hook
+                        onHeaderClick()
+                    },
+                    chatType = chatType,
+                    onSearch = doSearch,
+                    onClearChat = doClear,
+                    onBlockPeer = if (chatType == "private") doBlock else null,
+                    onLeaveGroup = if (chatType == "group") doLeave else null
                 )
             }
         },
@@ -228,7 +258,6 @@ fun ChatScreen(
             if (!inSelection && editTargetId == null) {
                 MessageInput(
                     onSend = { text ->
-                        // 🔒 Guard: toast + block sending if blocked either way
                         when {
                             iBlockedPeer -> {
                                 Toast.makeText(ctx, "You blocked this user", Toast.LENGTH_SHORT).show()
@@ -242,7 +271,6 @@ fun ChatScreen(
                         controller.sendText(chatId, currentUserId, text)
                     },
                     onAttach = {
-                        // 🔒 Guard attachments too
                         when {
                             iBlockedPeer -> {
                                 Toast.makeText(ctx, "You blocked this user", Toast.LENGTH_SHORT).show()
@@ -267,7 +295,6 @@ fun ChatScreen(
                 .background(Color(0xFFF1EAF5))
         ) {
             Column(Modifier.fillMaxSize()) {
-                // ====== BLOCK BANNERS ======
                 when {
                     iBlockedPeer -> {
                         BlockBanner(
@@ -301,7 +328,6 @@ fun ChatScreen(
                         val firstMsg = messages[g.start]
                         val isGroupChat = chatType == "group"
 
-                        // Day divider between blocks
                         val prevMsg = messages.getOrNull(g.start - 1)
                         val prevMs = prevMsg?.sentAtMs()
                         val firstMs = firstMsg.sentAtMs()
@@ -330,7 +356,6 @@ fun ChatScreen(
                                     horizontalArrangement = if (me) Arrangement.End else Arrangement.Start,
                                     verticalAlignment = Alignment.Top
                                 ) {
-                                    // ⬅️ Avatar per message for group chats (for other users)
                                     if (!me && isGroupChat) {
                                         AvatarWithStatus(
                                             size = 30.dp,
@@ -340,7 +365,6 @@ fun ChatScreen(
                                         Spacer(Modifier.width(8.dp))
                                     }
 
-                                    // Sender label on first message of a (sender) run in group chats
                                     val showNameLabel =
                                         isGroupChat && !me &&
                                                 (i == g.start || messages[i - 1].senderId != m.senderId)
@@ -363,11 +387,8 @@ fun ChatScreen(
                                             me -> Color(0xFF7A3EB1)
                                             else -> Color(0xFF2D7FF9)
                                         }
-                                        val shape = bubbleShapeInBlock(
-                                            isMe = me,
-                                            idx = 0,
-                                            lastIdx = 0
-                                        )
+
+                                        val shape = bubbleShapeInBlock(isMe = me, idx = 0, lastIdx = 0)
 
                                         Box(
                                             modifier = Modifier.combinedClickable(
@@ -479,7 +500,6 @@ fun ChatScreen(
                                                 }
                                             }
 
-                                            // selection badge
                                             if (selectedThis) {
                                                 Box(
                                                     modifier = Modifier
@@ -501,7 +521,6 @@ fun ChatScreen(
                                     }
                                 }
 
-                                // vertical spacing between messages
                                 if (i != g.end) Spacer(Modifier.height(8.dp))
                             }
                         }
@@ -510,7 +529,6 @@ fun ChatScreen(
                     }
                 }
 
-                // Edit dialog
                 if (editTargetId != null) {
                     EditMessageDialog(
                         text = editText,
@@ -524,7 +542,6 @@ fun ChatScreen(
                     )
                 }
 
-                // Delete dialog
                 if (showDeleteDialog) {
                     DeleteChoiceDialog(
                         count = selected.size,
@@ -548,7 +565,6 @@ fun ChatScreen(
                     )
                 }
 
-                // Attach chooser dialog
                 if (showAttachDialog) {
                     AttachChooserDialog(
                         onPickMedia = {
@@ -567,7 +583,6 @@ fun ChatScreen(
                     )
                 }
 
-                // Media viewer
                 viewer?.let { v ->
                     MediaViewerDialog(
                         url = v.url,
@@ -592,7 +607,5 @@ private fun BlockBanner(text: String, bg: Color, fg: Color) {
         Text(text, color = fg, style = MaterialTheme.typography.bodyMedium)
     }
 }
-
-/* ---------- tiny helpers ---------- */
 
 private fun String?.orElse(fallback: String) = if (this.isNullOrEmpty()) fallback else this

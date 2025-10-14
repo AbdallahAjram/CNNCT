@@ -56,7 +56,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("com.vanniktech:android-image-cropper:4.6.0")
 
-
+    implementation("androidx.navigation:navigation-compose:2.7.7")
     implementation("io.agora.rtc:full-sdk:4.6.0")
     // Core Moshi runtime
     implementation("com.squareup.moshi:moshi:1.15.2")

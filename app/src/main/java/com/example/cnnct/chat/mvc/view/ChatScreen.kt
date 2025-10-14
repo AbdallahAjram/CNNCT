@@ -17,17 +17,26 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.cnnct.chat.mvc.controller.ChatController
 import com.cnnct.chat.mvc.model.Message
@@ -65,7 +74,7 @@ fun ChatScreen(
     iBlockedPeer: Boolean = false,
     blockedByOther: Boolean = false,
 
-    // NEW: timestamp after which messages are visible (per-user clear)
+    // timestamp after which messages are visible (per-user clear)
     clearedBeforeMs: Long? = null,
 
     blockedUserIds: Set<String> = emptySet(),
@@ -73,7 +82,7 @@ fun ChatScreen(
     onBack: () -> Unit = {},
     onCallClick: () -> Unit = {},
 
-    // NEW: header tap + 3-dots menu callbacks (nullable; we provide toast fallbacks)
+    // header tap + 3-dots menu callbacks
     onHeaderClick: () -> Unit = {},
     onSearch: (() -> Unit)? = null,
     onClearChat: (() -> Unit)? = null,
@@ -83,19 +92,54 @@ fun ChatScreen(
     val ctx = LocalContext.current
     val messagesRaw by controller.messages.collectAsState()
     val listState = rememberLazyListState()
+    val focusManager = LocalFocusManager.current
 
     // Hide messages that are "for me" cleared: only show items with time >= clearedBeforeMs
     val messages = remember(messagesRaw, currentUserId, clearedBeforeMs) {
         messagesRaw.filter { m ->
-            // hidden-for-me
             val hiddenOk = m.hiddenFor?.contains(currentUserId) != true
-            // cleared filter
             val sentTime = m.createdAt?.toDate()?.time ?: m.createdAtClient?.toDate()?.time
             val clearOk = clearedBeforeMs?.let { cutoff ->
-                // if timestamp missing, keep it (defensive), else compare
                 sentTime == null || sentTime >= cutoff
             } ?: true
             hiddenOk && clearOk
+        }
+    }
+
+    // Search functionality state
+    var searchQuery by remember { mutableStateOf("") }
+    var searchMatches by remember { mutableStateOf<List<Int>>(emptyList()) }
+    var currentMatchIndex by remember { mutableStateOf(0) }
+    var isSearchActive by remember { mutableStateOf(false) }
+    val searchFocusRequester = remember { FocusRequester() }
+
+    // Update search results when query or messages change
+    LaunchedEffect(searchQuery, messages) {
+        if (searchQuery.isNotBlank()) {
+            val matches = messages.mapIndexedNotNull { index, msg ->
+                if (msg.text?.contains(searchQuery, ignoreCase = true) == true &&
+                    !msg.deleted && msg.type == MessageType.text) index else null
+            }
+            searchMatches = matches
+            currentMatchIndex = if (matches.isNotEmpty()) 0 else -1
+
+            // Auto-scroll to first match
+            if (matches.isNotEmpty()) {
+                listState.animateScrollToItem(matches[0])
+            }
+        } else {
+            searchMatches = emptyList()
+            currentMatchIndex = -1
+        }
+    }
+
+    // Auto-scroll to current match when navigating
+    LaunchedEffect(currentMatchIndex) {
+        if (currentMatchIndex >= 0 && currentMatchIndex < searchMatches.size) {
+            val matchIndex = searchMatches[currentMatchIndex]
+            if (matchIndex >= 0 && matchIndex < messages.size) {
+                listState.animateScrollToItem(matchIndex)
+            }
         }
     }
 
@@ -108,6 +152,10 @@ fun ChatScreen(
     var editText by remember { mutableStateOf("") }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showAttachDialog by remember { mutableStateOf(false) }
+
+    // NEW: confirmation dialogs
+    var showClearDialog by remember { mutableStateOf(false) }
+    var showBlockDialog by remember { mutableStateOf(false) }
 
     data class ViewMedia(val url: String, val name: String?)
     var viewer by remember { mutableStateOf<ViewMedia?>(null) }
@@ -162,7 +210,11 @@ fun ChatScreen(
         onDispose { controller.stop() }
     }
     LaunchedEffect(chatId) { controller.markOpened(chatId, currentUserId) }
-    LaunchedEffect(messages.size) { if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex) }
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty() && !isSearchActive) {
+            listState.animateScrollToItem(messages.lastIndex)
+        }
+    }
 
     val isAtBottom by remember {
         derivedStateOf {
@@ -170,8 +222,8 @@ fun ChatScreen(
             lastVisible != null && messages.isNotEmpty() && lastVisible >= messages.lastIndex
         }
     }
-    LaunchedEffect(isAtBottom, messages.lastOrNull()?.id, inSelection) {
-        if (isAtBottom && !inSelection) {
+    LaunchedEffect(isAtBottom, messages.lastOrNull()?.id, inSelection, isSearchActive) {
+        if (isAtBottom && !inSelection && !isSearchActive) {
             messages.lastOrNull()?.let { last -> controller.markRead(chatId, currentUserId, last.id) }
         }
     }
@@ -201,7 +253,30 @@ fun ChatScreen(
 
     Scaffold(
         topBar = {
-            if (inSelection) {
+            if (isSearchActive) {
+                SearchTopBar(
+                    searchQuery = searchQuery,
+                    onSearchQueryChange = { searchQuery = it },
+                    matchCount = searchMatches.size,
+                    currentMatchIndex = currentMatchIndex,
+                    onPreviousMatch = {
+                        if (searchMatches.isNotEmpty()) {
+                            currentMatchIndex = if (currentMatchIndex > 0) currentMatchIndex - 1 else searchMatches.lastIndex
+                        }
+                    },
+                    onNextMatch = {
+                        if (searchMatches.isNotEmpty()) {
+                            currentMatchIndex = if (currentMatchIndex < searchMatches.lastIndex) currentMatchIndex + 1 else 0
+                        }
+                    },
+                    onCloseSearch = {
+                        isSearchActive = false
+                        searchQuery = ""
+                        focusManager.clearFocus()
+                    },
+                    focusRequester = searchFocusRequester
+                )
+            } else if (inSelection) {
                 SelectionTopBar(
                     count = selected.size,
                     canEdit = selected.size == 1 &&
@@ -217,11 +292,31 @@ fun ChatScreen(
                     onDeleteClick = { showDeleteDialog = true }
                 )
             } else {
-                // Build default (toast) handlers if caller didn't pass any
-                val doSearch = onSearch ?: { Toast.makeText(ctx, "Search (placeholder)", Toast.LENGTH_SHORT).show() }
-                val doClear = onClearChat ?: { Toast.makeText(ctx, "Clear chat (placeholder)", Toast.LENGTH_SHORT).show() }
-                val doBlock = onBlockPeer ?: { Toast.makeText(ctx, "Block (placeholder)", Toast.LENGTH_SHORT).show() }
+                // FIX: Use LaunchedEffect to handle focus when search becomes active
+                var triggerFocus by remember { mutableStateOf(false) }
+
+                val doSearch = {
+                    isSearchActive = true
+                    triggerFocus = true
+                }
+
+                val doClear = {
+                    if (onClearChat != null) showClearDialog = true
+                    else Toast.makeText(ctx, "Clear chat (placeholder)", Toast.LENGTH_SHORT).show()
+                }
+                val doBlock = {
+                    if (onBlockPeer != null) showBlockDialog = true
+                    else Toast.makeText(ctx, "Block (placeholder)", Toast.LENGTH_SHORT).show()
+                }
                 val doLeave = onLeaveGroup ?: { Toast.makeText(ctx, "Leave group (placeholder)", Toast.LENGTH_SHORT).show() }
+
+                // Handle focus when search is triggered
+                if (triggerFocus) {
+                    LaunchedEffect(Unit) {
+                        searchFocusRequester.requestFocus()
+                        triggerFocus = false // Reset the trigger
+                    }
+                }
 
                 TopBar(
                     title = title,
@@ -231,7 +326,6 @@ fun ChatScreen(
                     onBack = onBack,
                     onCallClick = onCallClick,
                     onHeaderClick = {
-                        // Open info screen based on chat type
                         if (chatType == "private" && otherUserId != null) {
                             ctx.startActivity(
                                 Intent(ctx, PersonInfoActivity::class.java)
@@ -243,7 +337,6 @@ fun ChatScreen(
                                     .putExtra("chatId", chatId)
                             )
                         }
-                        // also allow external hook
                         onHeaderClick()
                     },
                     chatType = chatType,
@@ -255,7 +348,7 @@ fun ChatScreen(
             }
         },
         bottomBar = {
-            if (!inSelection && editTargetId == null) {
+            if (!inSelection && editTargetId == null && !isSearchActive) {
                 MessageInput(
                     onSend = { text ->
                         when {
@@ -305,7 +398,7 @@ fun ChatScreen(
                     }
                     blockedByOther -> {
                         BlockBanner(
-                            text = "⚠️ This user has blocked you. You can’t send messages.",
+                            text = "⚠️ This user has blocked you. You can't send messages.",
                             bg = MaterialTheme.colorScheme.tertiaryContainer,
                             fg = MaterialTheme.colorScheme.onTertiaryContainer
                         )
@@ -322,7 +415,7 @@ fun ChatScreen(
                         .fillMaxWidth()
                         .weight(1f)
                         .padding(horizontal = 8.dp),
-                    contentPadding = PaddingValues(bottom = if (editTargetId == null) 80.dp else 16.dp)
+                    contentPadding = PaddingValues(bottom = if (editTargetId == null && !isSearchActive) 80.dp else 16.dp)
                 ) {
                     itemsIndexed(groups) { gIndex, g ->
                         val firstMsg = messages[g.start]
@@ -350,6 +443,10 @@ fun ChatScreen(
                                 val m = messages[i]
                                 val me = (m.senderId == currentUserId)
                                 val selectedThis = selected.contains(m.id)
+
+                                // Search highlighting
+                                val isSearchMatch = searchMatches.contains(i)
+                                val isCurrentSearchMatch = searchMatches.getOrNull(currentMatchIndex) == i
 
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -383,9 +480,17 @@ fun ChatScreen(
                                         }
 
                                         val bubbleColor = when {
+                                            isCurrentSearchMatch -> Color(0xFFCCE5FF) // Highlight current search match
+                                            isSearchMatch -> Color(0xFFEAF3FF) // Highlight all search matches
                                             m.deleted -> MaterialTheme.colorScheme.surfaceVariant
                                             me -> Color(0xFF7A3EB1)
                                             else -> Color(0xFF2D7FF9)
+                                        }
+
+                                        val textColor = when {
+                                            isCurrentSearchMatch || isSearchMatch -> Color.Black // Dark text for highlighted backgrounds
+                                            m.deleted -> MaterialTheme.colorScheme.onSurfaceVariant
+                                            else -> Color.White
                                         }
 
                                         val shape = bubbleShapeInBlock(isMe = me, idx = 0, lastIdx = 0)
@@ -421,15 +526,25 @@ fun ChatScreen(
                                                     if (m.deleted) {
                                                         Text(
                                                             text = if (me) "You deleted this message." else "This message was deleted.",
-                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            color = textColor,
                                                             style = MaterialTheme.typography.bodyMedium
                                                         )
                                                     } else if (m.type == MessageType.text) {
-                                                        Text(
-                                                            text = m.text.orElse(""),
-                                                            color = Color.White,
-                                                            style = MaterialTheme.typography.bodyMedium
-                                                        )
+                                                        val messageText = m.text.orElse("")
+                                                        if (isSearchMatch && searchQuery.isNotBlank()) {
+                                                            // Highlight search terms in message text
+                                                            HighlightedText(
+                                                                text = messageText,
+                                                                query = searchQuery,
+                                                                textColor = textColor
+                                                            )
+                                                        } else {
+                                                            Text(
+                                                                text = messageText,
+                                                                color = textColor,
+                                                                style = MaterialTheme.typography.bodyMedium
+                                                            )
+                                                        }
                                                     } else {
                                                         AttachmentContent(
                                                             message = m,
@@ -457,7 +572,7 @@ fun ChatScreen(
                                                             time + timeSuffix,
                                                             color = if (m.deleted)
                                                                 MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
-                                                            else Color.White.copy(alpha = 0.75f),
+                                                            else textColor.copy(alpha = 0.75f),
                                                             style = MaterialTheme.typography.labelSmall
                                                         )
 
@@ -590,10 +705,204 @@ fun ChatScreen(
                         onDismiss = { viewer = null }
                     )
                 }
+
+                // ========================
+                // Confirm dialogs
+                // ========================
+                if (showClearDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showClearDialog = false },
+                        title = { Text("Clear chat?") },
+                        text = {
+                            Text(
+                                "This will clear the conversation on your device. " +
+                                        "Messages remain for others and in Firestore."
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                showClearDialog = false
+                                onClearChat?.invoke()
+                            }) { Text("Clear") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showClearDialog = false }) { Text("Cancel") }
+                        }
+                    )
+                }
+
+                if (showBlockDialog) {
+                    val isPrivate = chatType == "private"
+                    AlertDialog(
+                        onDismissRequest = { showBlockDialog = false },
+                        title = { Text("Block user?") },
+                        text = {
+                            Text(
+                                if (isPrivate) {
+                                    "You won't receive messages or calls from this user. " +
+                                            "You can unblock later from their profile."
+                                } else {
+                                    "Blocking is only available for one-to-one chats."
+                                }
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(
+                                enabled = isPrivate && onBlockPeer != null && otherUserId != null,
+                                onClick = {
+                                    showBlockDialog = false
+                                    if (isPrivate && onBlockPeer != null && otherUserId != null) {
+                                        onBlockPeer.invoke()
+                                    } else {
+                                        Toast.makeText(ctx, "Block not available", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            ) { Text("Block") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showBlockDialog = false }) { Text("Cancel") }
+                        }
+                    )
+                }
             }
         }
     }
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SearchTopBar(
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    matchCount: Int,
+    currentMatchIndex: Int,
+    onPreviousMatch: () -> Unit,
+    onNextMatch: () -> Unit,
+    onCloseSearch: () -> Unit,
+    focusRequester: FocusRequester
+) {
+    CenterAlignedTopAppBar(
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                // Search field - using basic styling
+                TextField(
+                    value = searchQuery,
+                    onValueChange = onSearchQueryChange,
+                    placeholder = { Text("Search...", color = Color.Gray) },
+                    singleLine = true,
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(focusRequester),
+                    // Use default colors without custom configuration
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { /* Handle done */ })
+                )
+
+                // Match counter and navigation
+                if (matchCount > 0) {
+                    Text(
+                        text = "${currentMatchIndex + 1}/$matchCount",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(horizontal = 8.dp)
+                    )
+
+                    IconButton(
+                        onClick = onPreviousMatch,
+                        enabled = matchCount > 0
+                    ) {
+                        Icon(
+                            Icons.Default.KeyboardArrowUp,
+                            contentDescription = "Previous match",
+                            tint = if (matchCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onNextMatch,
+                        enabled = matchCount > 0
+                    ) {
+                        Icon(
+                            Icons.Default.KeyboardArrowDown,
+                            contentDescription = "Next match",
+                            tint = if (matchCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                        )
+                    }
+                }
+            }
+        },
+        navigationIcon = {
+            IconButton(onClick = onCloseSearch) {
+                Icon(Icons.Default.Close, contentDescription = "Close search")
+            }
+        },
+        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface
+        )
+    )
+}
+
+@Composable
+private fun HighlightedText(
+    text: String,
+    query: String,
+    textColor: Color
+) {
+    if (query.isEmpty()) {
+        Text(text = text, color = textColor, style = MaterialTheme.typography.bodyMedium)
+        return
+    }
+
+    val regex = Regex(Regex.escape(query), RegexOption.IGNORE_CASE)
+    val matches = regex.findAll(text)
+    val spans = mutableListOf<TextSpan>()
+    var lastIndex = 0
+
+    matches.forEach { match ->
+        // Add normal text before match
+        if (match.range.first > lastIndex) {
+            spans.add(TextSpan(text.substring(lastIndex, match.range.first), false))
+        }
+        // Add highlighted match
+        spans.add(TextSpan(text.substring(match.range.first, match.range.last + 1), true))
+        lastIndex = match.range.last + 1
+    }
+    // Add remaining text
+    if (lastIndex < text.length) {
+        spans.add(TextSpan(text.substring(lastIndex), false))
+    }
+
+    Text(
+        text = buildAnnotatedString {
+            spans.forEach { span ->
+                if (span.isHighlighted) {
+                    // Use basic color properties instead of complex SpanStyle constructor
+                    withStyle(
+                        style = SpanStyle(
+                            background = Color.Yellow,
+                            color = Color.Black
+                        )
+                    ) {
+                        append(span.text)
+                    }
+                } else {
+                    withStyle(
+                        style = SpanStyle(color = textColor)
+                    ) {
+                        append(span.text)
+                    }
+                }
+            }
+        },
+        style = MaterialTheme.typography.bodyMedium
+    )
+}
+
+private data class TextSpan(val text: String, val isHighlighted: Boolean)
 
 @Composable
 private fun BlockBanner(text: String, bg: Color, fg: Color) {

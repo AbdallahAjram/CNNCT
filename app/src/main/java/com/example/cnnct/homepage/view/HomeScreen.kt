@@ -126,6 +126,12 @@ fun HomeScreen(callsController: CallsController, onLogout: () -> Unit) {
         }
     }
 
+    // ===== Confirmation dialog state for block/unblock =====
+    var showBlockDialog by remember { mutableStateOf(false) }
+    var pendingBlockPeerId by remember { mutableStateOf<String?>(null) }
+    var pendingBlockChatId by remember { mutableStateOf<String?>(null) }
+    var isPendingBlock by remember { mutableStateOf(false) }
+
     // Block / Unblock Firestore writes
     fun blockPeer(chatId: String, peerId: String) {
         db.collection("users").document(currentUserId)
@@ -379,12 +385,11 @@ fun HomeScreen(callsController: CallsController, onLogout: () -> Unit) {
                             val isBlocked = peerId != null && blockedPeers.contains(peerId)
                             if (peerId != null && selectedChat != null) {
                                 IconButton(onClick = {
-                                    if (isBlocked) {
-                                        unblockPeer(selectedChat.id, peerId)
-                                    } else {
-                                        blockPeer(selectedChat.id, peerId)
-                                    }
-                                    clearSelection()
+                                    // Open confirm dialog
+                                    pendingBlockPeerId = peerId
+                                    pendingBlockChatId = selectedChat.id
+                                    isPendingBlock = !isBlocked
+                                    showBlockDialog = true
                                 }) {
                                     Icon(
                                         Icons.Default.Block,
@@ -544,6 +549,41 @@ fun HomeScreen(callsController: CallsController, onLogout: () -> Unit) {
                 isMuted = { chatId -> muteVersion /* read to subscribe */; MuteStore.isMuted(chatId) }
             )
         }
+    }
+
+    // 🧱 Confirm Block / Unblock
+    if (showBlockDialog) {
+        AlertDialog(
+            onDismissRequest = { showBlockDialog = false },
+            title = {
+                Text(if (isPendingBlock) "Block this user?" else "Unblock this user?")
+            },
+            text = {
+                Text(
+                    if (isPendingBlock)
+                        "They won’t be able to message or call you."
+                    else
+                        "You will be able to message this user again."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val chatId = pendingBlockChatId ?: return@TextButton
+                    val peerId = pendingBlockPeerId ?: return@TextButton
+                    if (isPendingBlock) blockPeer(chatId, peerId) else unblockPeer(chatId, peerId)
+                    showBlockDialog = false
+                    // keep or clear selection; UX: clear
+                    clearSelection()
+                }) {
+                    Text(if (isPendingBlock) "Block" else "Unblock")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBlockDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 

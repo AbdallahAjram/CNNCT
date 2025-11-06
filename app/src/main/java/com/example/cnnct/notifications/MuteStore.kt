@@ -31,14 +31,27 @@ object MuteStore {
             .addSnapshotListener { snap, _ ->
                 if (snap == null) return@addSnapshotListener
                 val map = ConcurrentHashMap<String, Long>()
+
                 for (d in snap.documents) {
-                    val ts = d.getTimestamp("mutedUntil")?.toDate()?.time
-                    if (ts != null) map[d.id] = ts
+                    val raw = d.get("mutedUntil")
+                    val untilMs: Long = when (raw) {
+                        is com.google.firebase.Timestamp -> raw.toDate().time
+                        is Long -> raw
+                        is Int -> raw.toLong()
+                        is Double -> raw.toLong()
+                        is Number -> raw.toLong()
+                        is String -> raw.toLongOrNull() ?: 0L
+                        null -> 0L
+                        else -> 0L
+                    }
+                    if (untilMs > 0L) map[d.id] = untilMs
                 }
+
                 mutedUntilByChat.clear()
                 mutedUntilByChat.putAll(map)
                 notifyChanged()
             }
+
     }
 
     fun stop() {

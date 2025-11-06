@@ -109,6 +109,7 @@
             android:name=".notifications.view.NotificationSettingsActivity"
             android:exported="false" />
 
+
         <!-- CanHub Cropper: needs an ActionBar -->
         <activity
             android:name="com.canhub.cropper.CropImageActivity"
@@ -129,9 +130,10 @@
             android:exported="false"
             android:launchMode="singleTop" />
 
-        <activity android:name=".chat.view.PersonInfoActivity" android:exported="false"/>
-        <activity android:name=".chat.view.GroupInfoActivity" android:exported="false"/>
+        <activity android:name=".chat.view.PersonInfoActivity" android:exported="false"  android:launchMode="singleTop"/>
+        <activity android:name=".chat.view.GroupInfoActivity" android:exported="false"  android:launchMode="singleTop"/>
 
-
+        <activity android:name=".settings.view.ArchiveSettingsActivity" android:exported="false"/>
+        <activity android:name=".settings.view.PrivacySettingsActivity" android:exported="false"/>
     </application>
 </manifest>

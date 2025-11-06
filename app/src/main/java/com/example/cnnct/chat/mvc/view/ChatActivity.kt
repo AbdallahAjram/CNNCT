@@ -1,5 +1,6 @@
 package com.example.cnnct.chat.view
 
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
@@ -11,21 +12,25 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
+import com.cnnct.chat.mvc.controller.ChatController
+import com.cnnct.chat.mvc.model.FirestoreChatRepository
+import com.cnnct.chat.mvc.view.ChatScreen
+import com.example.cnnct.calls.controller.CallsController
+import com.example.cnnct.homepage.controller.HomePController
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
+import com.google.firebase.firestore.ktx.getField
 import com.google.firebase.firestore.firestore
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-import com.cnnct.chat.mvc.model.FirestoreChatRepository
-import com.cnnct.chat.mvc.controller.ChatController
-import com.cnnct.chat.mvc.view.ChatScreen
-import com.example.cnnct.calls.controller.CallsController
-import com.example.cnnct.homepage.controller.HomePController
-import com.example.cnnct.chat.controller.ChatInfoController
+
+// bring these in so header actions compile
+import com.example.cnnct.chat.view.PersonInfoActivity
+import com.example.cnnct.chat.view.GroupInfoActivity
 
 class ChatActivity : ComponentActivity() {
     @RequiresApi(Build.VERSION_CODES.O)
@@ -37,7 +42,6 @@ class ChatActivity : ComponentActivity() {
 
         val repo = FirestoreChatRepository(Firebase.firestore)
         val controller = ChatController(repo, currentUserId)
-        val infoCtrl = ChatInfoController()
 
         setContent {
             val ctx = LocalContext.current
@@ -58,6 +62,9 @@ class ChatActivity : ComponentActivity() {
             var iBlockedOther by remember { mutableStateOf(false) }
             var blockListener: ListenerRegistration? by remember { mutableStateOf<ListenerRegistration?>(null) }
 
+            // Keep a live listener to the peer's user doc to drive the private header
+            var peerHeaderReg: ListenerRegistration? by remember { mutableStateOf<ListenerRegistration?>(null) }
+
             // --- per-user "cleared" timestamp (null = nothing cleared)
             val clearedBeforeMs by produceState<Long?>(initialValue = null, key1 = currentUserId, key2 = chatId) {
                 if (currentUserId.isBlank()) { value = null; return@produceState }
@@ -70,20 +77,121 @@ class ChatActivity : ComponentActivity() {
                 awaitDispose { reg.remove() }
             }
 
-            // --- helpers copied from HomeScreen (block + mirror flags) ---
-            suspend fun updateChatBlockFlags(chatId: String, me: String, peer: String, blocked: Boolean) {
-                try {
-                    db.collection("chats").document(chatId).set(
-                        mapOf(
-                            "memberMeta" to mapOf(
-                                me to mapOf("iBlockedPeer" to blocked),
-                                peer to mapOf("blockedByOther" to blocked)
+            // ---- live chat document listener (keeps header + members fresh, AND feeds mute state if you still use it)
+            val mutedByAdmin by produceState(initialValue = false, key1 = chatId, key2 = currentUserId) {
+                val reg = db.collection("chats").document(chatId)
+                    .addSnapshotListener { snap, _ ->
+                        val data = snap?.data.orEmpty()
+
+                        val type = (data["type"] as? String) ?: "private"
+                        chatType = type
+
+                        val members = (data["members"] as? List<*>)?.filterIsInstance<String>().orEmpty()
+                        memberIds = members
+
+                        if (type == "private") {
+                            val other = members.firstOrNull { it != currentUserId }
+                            otherUserId = other
+
+                            // stop previous peer header listener if any
+                            peerHeaderReg?.remove()
+                            peerHeaderReg = null
+
+                            if (other != null) {
+                                // Live header from the peer user doc
+                                peerHeaderReg = db.collection("users").document(other)
+                                    .addSnapshotListener { uSnap, _ ->
+                                        val dn = uSnap?.getString("displayName") ?: "Unknown"
+                                        val photo = uSnap?.getString("photoUrl")
+                                        nameMap = mapOf(other to dn)
+                                        photoMap = mapOf(other to photo)
+                                        headerTitle = dn
+                                        headerSubtitle = null
+                                        headerPhotoUrl = photo
+                                    }
+                            } else {
+                                // fallback
+                                headerTitle = "Chat"
+                                headerSubtitle = null
+                                headerPhotoUrl = null
+                            }
+                        } else {
+                            // group header
+                            headerTitle = (data["groupName"] as? String) ?: "Group"
+                            headerSubtitle = "${members.size} members"
+                            headerPhotoUrl = (data["groupPhotoUrl"] as? String)
+                        }
+
+                        // If you’ve removed group mutes entirely, this will always be false
+                        val mutedList = (data["mutedMemberIds"] as? List<*>)?.filterIsInstance<String>().orEmpty()
+                        value = (type == "group") && (currentUserId in mutedList)
+                    }
+                awaitDispose {
+                    reg.remove()
+                    peerHeaderReg?.remove()
+                    peerHeaderReg = null
+                }
+            }
+
+            // Load peer-specific state for private chat (block mirror + controller flags)
+            LaunchedEffect(otherUserId) {
+                val other = otherUserId ?: return@LaunchedEffect
+                controller.setPeerUser(other)
+
+                // realtime block state (me → blocks collection)
+                blockListener?.remove()
+                blockListener = db.collection("users")
+                    .document(currentUserId)
+                    .collection("blocks")
+                    .document(other)
+                    .addSnapshotListener { snap, _ ->
+                        val blocked = snap?.exists() == true
+                        iBlockedOther = blocked
+                        controller.setIBlockedPeer(blocked)
+                    }
+            }
+
+            // Hydrate names/photos for group members (best effort, chunked)
+            LaunchedEffect(chatType, memberIds) {
+                if (chatType != "group" || memberIds.isEmpty()) return@LaunchedEffect
+                val accNames = mutableMapOf<String, String>()
+                val accPhotos = mutableMapOf<String, String?>()
+                for (chunk in memberIds.chunked(10)) {
+                    val usersSnap = db.collection("users")
+                        .whereIn(FieldPath.documentId(), chunk)
+                        .get().await()
+                    for (doc in usersSnap.documents) {
+                        accNames[doc.id] = doc.getString("displayName") ?: "Unknown"
+                        accPhotos[doc.id] = doc.getString("photoUrl")
+                    }
+                }
+                nameMap = accNames
+                photoMap = accPhotos
+            }
+
+            // --- helpers: write mirrored block flags into chat.memberMeta
+            suspend fun updateChatBlockFlags(
+                chatId: String,
+                me: String,
+                peer: String,
+                blocked: Boolean
+            ) {
+                runCatching {
+                    Firebase.firestore.collection("chats").document(chatId)
+                        .set(
+                            mapOf(
+                                "memberMeta" to mapOf(
+                                    me to mapOf("iBlockedPeer" to blocked),
+                                    peer to mapOf("blockedByOther" to blocked)
+                                ),
+                                "updatedAt" to FieldValue.serverTimestamp()
                             ),
-                            "updatedAt" to FieldValue.serverTimestamp()
-                        ),
-                        SetOptions.merge()
-                    ).await()
-                } catch (_: Exception) { /* no-op UI-wise */ }
+                            SetOptions.merge()
+                        )
+                        .await()
+                }.onFailure {
+                    // ignore UI-wise (or log)
+                }
             }
 
             fun blockPeerFromTopBar(chatId: String, me: String, peerId: String) {
@@ -92,74 +200,15 @@ class ChatActivity : ComponentActivity() {
                     .set(mapOf("blocked" to true, "createdAt" to FieldValue.serverTimestamp()))
                     .addOnSuccessListener {
                         scope.launch { updateChatBlockFlags(chatId, me, peerId, true) }
-                        Toast.makeText(ctx, "Blocked", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@ChatActivity, "Blocked", Toast.LENGTH_SHORT).show()
                     }
                     .addOnFailureListener {
-                        Toast.makeText(ctx, "Block failed", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@ChatActivity, "Block failed", Toast.LENGTH_SHORT).show()
                     }
             }
-            // --------------------------------------------------------------
 
-            // Load chat meta
-            LaunchedEffect(chatId) {
-                controller.openChat(chatId)
-
-                val chatSnap = db.collection("chats").document(chatId).get().await()
-                val type = chatSnap.getString("type") ?: "private"
-                chatType = type
-
-                val members = (chatSnap.get("members") as? List<String>).orEmpty()
-                memberIds = members
-
-                if (type == "private") {
-                    otherUserId = members.firstOrNull { it != currentUserId }
-                    controller.setPeerUser(otherUserId)
-
-                    otherUserId?.let { other ->
-                        blockListener?.remove()
-                        blockListener = db.collection("users")
-                            .document(currentUserId)
-                            .collection("blocks")
-                            .document(other)
-                            .addSnapshotListener { snap, _ ->
-                                val blocked = snap?.exists() == true
-                                iBlockedOther = blocked
-                                controller.setIBlockedPeer(blocked)
-                            }
-
-                        val userDoc = db.collection("users").document(other).get().await()
-                        val dn = userDoc.getString("displayName") ?: "Unknown"
-                        val photo = userDoc.getString("photoUrl")
-                        nameMap = mapOf(other to dn)
-                        photoMap = mapOf(other to photo)
-                        headerTitle = dn
-                        headerSubtitle = null
-                        headerPhotoUrl = photo
-                    }
-                } else {
-                    val ids = members
-                    val accNames = mutableMapOf<String, String>()
-                    val accPhotos = mutableMapOf<String, String?>()
-                    for (chunk in ids.chunked(10)) {
-                        if (chunk.isEmpty()) continue
-                        val usersSnap = db.collection("users")
-                            .whereIn(FieldPath.documentId(), chunk)
-                            .get().await()
-                        for (doc in usersSnap.documents) {
-                            accNames[doc.id] = doc.getString("displayName") ?: "Unknown"
-                            accPhotos[doc.id] = doc.getString("photoUrl")
-                        }
-                    }
-                    nameMap = accNames
-                    photoMap = accPhotos
-                    headerTitle = chatSnap.getString("groupName") ?: "Group"
-                    headerSubtitle = "${members.size} members"
-                    headerPhotoUrl = chatSnap.getString("groupPhotoUrl")
-                }
-            }
-
-            // Member meta (stream)
-            val memberMeta by produceState<Map<String, Any>?>(initialValue = null, chatId) {
+            // Member meta (stream) for read receipts + "blockedByOther"
+            val memberMeta by produceState<Map<String, Any>?>(initialValue = null, key1 = chatId) {
                 repo.streamChatMemberMeta(chatId).collect { value = it }
             }
 
@@ -170,13 +219,12 @@ class ChatActivity : ComponentActivity() {
             }
 
             // Presence map
-            val membersOnlineMap by produceState<Map<String, Long?>>(initialValue = emptyMap(), memberIds) {
+            val membersOnlineMap by produceState<Map<String, Long?>>(initialValue = emptyMap(), key1 = memberIds) {
                 if (memberIds.isEmpty()) { value = emptyMap(); return@produceState }
-                val dbLocal = Firebase.firestore
                 val listeners = mutableListOf<ListenerRegistration>()
                 val acc = mutableMapOf<String, Long?>()
                 memberIds.forEach { uid ->
-                    val reg = dbLocal.collection("users").document(uid)
+                    val reg = db.collection("users").document(uid)
                         .addSnapshotListener { snap, _ ->
                             val ms = snap?.getTimestamp("lastOnlineAt")?.toDate()?.time
                             acc[uid] = ms
@@ -187,8 +235,8 @@ class ChatActivity : ComponentActivity() {
                 awaitDispose { listeners.forEach { it.remove() } }
             }
 
-            // 1-1 extras for ticks
-            val otherMetaFromChat by produceState<Map<String, Any>?>(initialValue = null, chatId) {
+            // 1-1 extras for ticks (read/open markers)
+            val otherMetaFromChat by produceState<Map<String, Any>?>(initialValue = null, key1 = chatId) {
                 repo.streamChatMemberMeta(chatId).collect { value = it }
             }
             val otherLastReadId = remember(otherMetaFromChat, otherUserId) {
@@ -219,14 +267,14 @@ class ChatActivity : ComponentActivity() {
                         memberIds = memberIds,
                         memberMeta = memberMeta,
 
+                        // If you’ve removed mutes in UI, this will be false there anyway
+                        mutedByAdmin = mutedByAdmin,
+
                         iBlockedPeer = iBlockedOther,
                         blockedByOther = blockedByOther,
-
-                        clearedBeforeMs = clearedBeforeMs, // 👈 filter by per-user clear timestamp
-
+                        clearedBeforeMs = clearedBeforeMs,
                         blockedUserIds = if (iBlockedOther && otherUserId != null) setOf(otherUserId!!) else emptySet(),
                         onlineMap = membersOnlineMap,
-
                         onBack = { finish() },
                         onCallClick = {
                             val calleeId = otherUserId ?: return@ChatScreen
@@ -243,18 +291,14 @@ class ChatActivity : ComponentActivity() {
                                 }
                             )
                         },
-
-                        // ---- header & menu actions passed to the TopBar ----
                         onHeaderClick = {
                             if (chatType == "private" && otherUserId != null) {
-                                ctx.startActivity(
-                                    android.content.Intent(ctx, PersonInfoActivity::class.java)
-                                        .putExtra("uid", otherUserId)
+                                startActivity(
+                                    Intent(ctx, PersonInfoActivity::class.java).putExtra("uid", otherUserId)
                                 )
                             } else if (chatType == "group") {
-                                ctx.startActivity(
-                                    android.content.Intent(ctx, GroupInfoActivity::class.java)
-                                        .putExtra("chatId", chatId)
+                                startActivity(
+                                    Intent(ctx, GroupInfoActivity::class.java).putExtra("chatId", chatId)
                                 )
                             }
                         },
@@ -262,9 +306,8 @@ class ChatActivity : ComponentActivity() {
                             Toast.makeText(ctx, "Search (placeholder)", Toast.LENGTH_SHORT).show()
                         },
                         onClearChat = {
-                            // Write clearedBefore for ME only, UI will auto-filter by clearedBeforeMs
                             scope.launch {
-                                runCatching { infoCtrl.clearChatForMe(chatId) }
+                                runCatching { com.example.cnnct.chat.controller.ChatInfoController().clearChatForMe(chatId) }
                                     .onSuccess { Toast.makeText(ctx, "Chat cleared", Toast.LENGTH_SHORT).show() }
                                     .onFailure { Toast.makeText(ctx, "Failed to clear chat", Toast.LENGTH_SHORT).show() }
                             }
@@ -274,7 +317,53 @@ class ChatActivity : ComponentActivity() {
                             blockPeerFromTopBar(chatId, currentUserId, peer)
                         },
                         onLeaveGroup = {
-                            Toast.makeText(ctx, "Leave group (placeholder)", Toast.LENGTH_SHORT).show()
+                            // Real leave implementation
+                            scope.launch {
+                                try {
+                                    db.runTransaction { txn ->
+                                        val chatRef = db.collection("chats").document(chatId)
+                                        val snap = txn.get(chatRef)
+
+                                        val members = (snap.get("members") as? List<*>)?.filterIsInstance<String>()?.toMutableList()
+                                            ?: mutableListOf()
+                                        val admins  = (snap.get("adminIds") as? List<*>)?.filterIsInstance<String>()?.toMutableList()
+                                            ?: mutableListOf()
+
+                                        // Remove me
+                                        members.remove(currentUserId)
+                                        admins.remove(currentUserId)
+
+                                        val updates = mutableMapOf<String, Any?>(
+                                            "members" to members,
+                                            "adminIds" to admins,
+                                            "updatedAt" to FieldValue.serverTimestamp()
+                                        )
+
+                                        // If no admins remain but members still exist, promote the first member
+                                        if (admins.isEmpty() && members.isNotEmpty()) {
+                                            updates["adminIds"] = listOf(members.first())
+                                        }
+
+                                        txn.update(chatRef, updates as Map<String, Any?>)
+
+                                        // Optional: mark in userChats that I left (keeps history if you want)
+                                        val myLinkRef = db.collection("userChats").document(currentUserId)
+                                            .collection("chats").document(chatId)
+                                        txn.set(
+                                            myLinkRef,
+                                            mapOf("leftAt" to FieldValue.serverTimestamp()),
+                                            SetOptions.merge()
+                                        )
+
+                                        null
+                                    }.await()
+
+                                    Toast.makeText(this@ChatActivity, "You left the group", Toast.LENGTH_SHORT).show()
+                                    finish()
+                                } catch (e: Exception) {
+                                    Toast.makeText(this@ChatActivity, "Failed to leave: ${e.message}", Toast.LENGTH_LONG).show()
+                                }
+                            }
                         }
                     )
                 }

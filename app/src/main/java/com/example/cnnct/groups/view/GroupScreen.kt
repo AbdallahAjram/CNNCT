@@ -5,6 +5,7 @@ import android.net.Uri
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
@@ -15,7 +16,22 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Divider
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,6 +45,10 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
+import com.canhub.cropper.CropImageContract
+import com.canhub.cropper.CropImageContractOptions
+import com.canhub.cropper.CropImageOptions
+import com.canhub.cropper.CropImageView
 import com.example.cnnct.R
 import com.example.cnnct.common.view.UserAvatar
 import com.example.cnnct.groups.controller.GroupController
@@ -78,7 +98,6 @@ object UsersController {
 }
 
 /* ------------------------ Create Group Sheet state ------------------------ */
-
 private data class SelectableUser(
     val uid: String,
     val name: String,
@@ -192,7 +211,7 @@ fun GroupScreen() {
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showCreate = true }) {
+            androidx.compose.material3.FloatingActionButton(onClick = { showCreate = true }) {
                 Icon(Icons.Default.Add, contentDescription = "Create group")
             }
         },
@@ -213,7 +232,6 @@ fun GroupScreen() {
                     .fillMaxWidth()
                     .height(54.dp)
                     .focusRequester(focusRequester),
-                shape = MaterialTheme.shapes.large,
                 singleLine = true,
                 trailingIcon = {
                     if (searchQuery.isNotBlank()) {
@@ -223,6 +241,7 @@ fun GroupScreen() {
                     }
                 }
             )
+
 
             Spacer(Modifier.height(12.dp))
 
@@ -307,7 +326,7 @@ private fun GroupListItem(
                 photoUrl = groupPhotoUrl,
                 size = 44.dp,
                 contentDescription = "Group avatar",
-                fallbackRes = R.drawable.defaultgpp // ✅ use group default
+                fallbackRes = R.drawable.defaultgpp
             )
 
             Spacer(Modifier.width(12.dp))
@@ -386,7 +405,7 @@ private fun GroupListItem(
     }
 }
 
-/* ---------------- Create Group Sheet ---------------- */
+/* ---------------- Create Group Sheet (with cropper + visible buttons) ---------------- */
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -400,7 +419,41 @@ private fun CreateGroupSheet(
 
     var groupName by remember { mutableStateOf("") }
     var groupDesc by remember { mutableStateOf("") }
+
+    // Icon: pick → crop → preview → upload
     var iconUri by remember { mutableStateOf<Uri?>(null) }
+
+    // Cropper launcher
+    val cropLauncher = rememberLauncherForActivityResult(CropImageContract()) { result ->
+        if (result.isSuccessful) {
+            iconUri = result.uriContent
+        } else {
+            Toast.makeText(context, "Crop canceled", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Picker that immediately launches the cropper
+    val pickImage = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { picked: Uri? ->
+        picked ?: return@rememberLauncherForActivityResult
+        cropLauncher.launch(
+            CropImageContractOptions(
+                uri = picked,
+                cropImageOptions = CropImageOptions(
+                    cropShape = CropImageView.CropShape.RECTANGLE,
+                    aspectRatioX = 1,
+                    aspectRatioY = 1,
+                    fixAspectRatio = true,
+                    guidelines = CropImageView.Guidelines.ON_TOUCH,
+                    outputCompressFormat = android.graphics.Bitmap.CompressFormat.JPEG,
+                    outputCompressQuality = 92,
+                    activityTitle = "Crop group icon",
+                    cropMenuCropButtonTitle = "Done"
+                )
+            )
+        )
+    }
 
     // Candidates and selection
     var candidates by remember { mutableStateOf<List<SelectableUser>>(emptyList()) }
@@ -408,11 +461,6 @@ private fun CreateGroupSheet(
     var searching by remember { mutableStateOf(false) }
     var loadingPeers by remember { mutableStateOf(true) }
     var creating by remember { mutableStateOf(false) }
-
-    // Pick image
-    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        iconUri = uri
-    }
 
     // Load my private chat peers as defaults
     LaunchedEffect(Unit) {
@@ -490,13 +538,17 @@ private fun CreateGroupSheet(
             )
             Spacer(Modifier.height(8.dp))
 
-            // Icon picker
+            // Icon picker (choose → crop)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Group icon (optional)", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                TextButton(onClick = { pickImage.launch("image/*") }) { Text("Choose") }
+                TextButton(
+                    onClick = {
+                        pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }
+                ) { Text("Choose") }
             }
             Box(
                 modifier = Modifier
@@ -569,7 +621,7 @@ private fun CreateGroupSheet(
                                 .padding(vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Checkbox(
+                            androidx.compose.material3.Checkbox(
                                 checked = row.selected,
                                 onCheckedChange = {
                                     val idx = candidates.indexOfFirst { it.uid == row.uid }
@@ -599,7 +651,11 @@ private fun CreateGroupSheet(
                 OutlinedButton(
                     onClick = onDismiss,
                     modifier = Modifier.weight(1f),
-                    enabled = !creating
+                    enabled = !creating,
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary,
+                        disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
                 ) { Text("Cancel") }
 
                 Button(
@@ -616,7 +672,6 @@ private fun CreateGroupSheet(
                                     memberIds = selected,
                                     localIconUri = iconUri
                                 )
-                                // success → open and let the parent close the sheet
                                 onCreatedOpen(chatId)
                             } catch (e: Exception) {
                                 android.util.Log.e("CreateGroupSheet", "createGroup failed", e)
@@ -631,7 +686,13 @@ private fun CreateGroupSheet(
                         }
                     },
                     modifier = Modifier.weight(1f),
-                    enabled = groupName.isNotBlank() && !creating
+                    enabled = groupName.isNotBlank() && !creating,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                        disabledContentColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.9f)
+                    )
                 ) { Text(if (creating) "Creating…" else "Create") }
             }
 

@@ -1,4 +1,3 @@
-// file: com/cnnct/chat/mvc/controller/ChatController.kt
 package com.cnnct.chat.mvc.controller
 
 import android.content.ContentResolver
@@ -6,7 +5,9 @@ import android.net.Uri
 import com.cnnct.chat.mvc.model.ChatRepository
 import com.cnnct.chat.mvc.model.Message
 import com.cnnct.chat.mvc.model.MessageDraft
-import com.cnnct.chat.mvc.model.MessageType
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.MetadataChanges
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,22 +18,24 @@ class ChatController(
     private val currentUserId: String,
     private val externalScope: CoroutineScope? = null
 ) {
-    // Use external scope if provided, otherwise create our own supervisor scope
     private val scope = externalScope ?: CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private var streamJob: Job? = null
+    private var metaJob: ListenerRegistration? = null
+
     private val _messages = MutableStateFlow<List<Message>>(emptyList())
     val messages: StateFlow<List<Message>> = _messages
 
-    // last preview written
-    private var lastPreviewMessageIdForMe: String? = null
+    // 🔵 live memberMeta updates
+    private val _memberMeta = MutableStateFlow<Map<String, Any>?>(null)
+    val memberMeta: StateFlow<Map<String, Any>?> = _memberMeta
 
-    // Blocking awareness
+    private var lastPreviewMessageIdForMe: String? = null
     private var peerUserId: String? = null
+
     private val _iBlockedPeer = MutableStateFlow(false)
     val iBlockedPeer: StateFlow<Boolean> = _iBlockedPeer
 
-    // Surface send errors (e.g., PERMISSION_DENIED when the other has blocked me)
     private val _sendError = MutableStateFlow<String?>(null)
     val sendError: StateFlow<String?> = _sendError
 
@@ -45,6 +48,9 @@ class ChatController(
 
     fun openChat(chatId: String) {
         streamJob?.cancel()
+        metaJob?.remove()
+
+        // 🔄 Stream messages live
         streamJob = scope.launch {
             repo.streamMessages(chatId, pageSize = 50).collectLatest { list ->
                 val oldSize = _messages.value.size
@@ -55,12 +61,26 @@ class ChatController(
                 pushMyPreviewIfChanged(chatId, list)
             }
         }
+
+        // 🔵 FIXED: Listen for memberMeta updates with MetadataChanges.INCLUDE
+        metaJob = FirebaseFirestore.getInstance()
+            .collection("chats")
+            .document(chatId)
+            .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
+                if (error != null) {
+                    println("🔥 memberMeta listener error: ${error.message}")
+                    return@addSnapshotListener
+                }
+                val data = snapshot?.get("memberMeta") as? Map<String, Any>
+                if (data != null) {
+                    _memberMeta.value = data
+                }
+            }
     }
 
     fun sendText(chatId: String, senderId: String, text: String) {
         val clean = text.trim()
         if (clean.isEmpty()) return
-        // If I blocked the peer, don't send
         if (_iBlockedPeer.value) {
             _sendError.value = "You blocked this user. Unblock to chat."
             return
@@ -69,7 +89,6 @@ class ChatController(
             try {
                 repo.sendMessage(chatId, senderId, MessageDraft(text = clean))
             } catch (e: Exception) {
-                // PERMISSION_DENIED or other error (likely peer blocked me)
                 _sendError.value = "Message not sent. You may be blocked."
             }
         }
@@ -83,7 +102,9 @@ class ChatController(
         }
         scope.launch(Dispatchers.IO) {
             try {
-                uris.forEach { uri -> repo.sendAttachmentMessage(chatId, senderId, uri, cr) }
+                uris.forEach { uri ->
+                    repo.sendAttachmentMessage(chatId, senderId, uri, cr)
+                }
             } catch (e: Exception) {
                 _sendError.value = "Attachment not sent. You may be blocked."
             }
@@ -91,20 +112,32 @@ class ChatController(
     }
 
     fun markRead(chatId: String, userId: String, lastId: String?) {
-        scope.launch { repo.markRead(chatId, userId, lastId) }
+        scope.launch {
+            try {
+                repo.markRead(chatId, userId, lastId)
+            } catch (e: Exception) {
+                println("⚠️ markRead failed: ${e.message}")
+            }
+        }
     }
 
     fun markOpened(chatId: String, userId: String) {
-        scope.launch { repo.markOpened(chatId, userId) }
+        scope.launch {
+            try {
+                repo.markOpened(chatId, userId)
+            } catch (e: Exception) {
+                println("⚠️ markOpened failed: ${e.message}")
+            }
+        }
     }
 
     fun stop() {
         streamJob?.cancel()
-        if (externalScope == null) {
-            scope.cancel()
-        }
+        metaJob?.remove()
+        if (externalScope == null) scope.cancel()
     }
 
+    // 🔔 Mark incoming messages as delivered
     fun markDeliveredIfNeeded(chatId: String, currentUserId: String, newMessages: List<Message>) {
         scope.launch {
             val latestIncoming = newMessages
@@ -118,8 +151,7 @@ class ChatController(
         }
     }
 
-    // ===== Edit / Delete =====
-
+    // 📝 Edit message
     fun editMessage(chatId: String, messageId: String, newText: String) {
         val trimmed = newText.trim()
         if (trimmed.isEmpty()) return
@@ -135,11 +167,14 @@ class ChatController(
         }
     }
 
+    // 🗑 Delete for everyone
     fun deleteForEveryone(chatId: String, messageIds: List<String>) {
         if (messageIds.isEmpty()) return
         scope.launch {
             try {
-                messageIds.forEach { id -> repo.deleteForEveryone(chatId, id, currentUserId) }
+                messageIds.forEach { id ->
+                    repo.deleteForEveryone(chatId, id, currentUserId)
+                }
                 pushMyPreviewIfChanged(chatId, _messages.value)
             } catch (e: Exception) {
                 _sendError.value = "Delete failed."
@@ -147,11 +182,14 @@ class ChatController(
         }
     }
 
+    // 🗑 Delete for me
     fun deleteForMe(chatId: String, messageIds: List<String>) {
         if (messageIds.isEmpty()) return
         scope.launch {
             try {
-                messageIds.forEach { id -> repo.deleteForMe(chatId, id, currentUserId) }
+                messageIds.forEach { id ->
+                    repo.deleteForMe(chatId, id, currentUserId)
+                }
                 pushMyPreviewIfChanged(chatId, _messages.value)
             } catch (e: Exception) {
                 _sendError.value = "Delete failed."
@@ -159,9 +197,7 @@ class ChatController(
         }
     }
 
-    /* ============================================================
-       Per-user Home preview
-       ============================================================ */
+    // 🏠 Update home preview
     private fun pushMyPreviewIfChanged(chatId: String, list: List<Message>) {
         val latest = list.asReversed().firstOrNull { m ->
             !m.deleted && (m.hiddenFor?.contains(currentUserId) != true)
@@ -179,7 +215,7 @@ class ChatController(
                     latest = latest
                 )
             } catch (_: Exception) {
-                // ignore; next snapshot will try again
+                // ignore, next snapshot will catch up
             }
         }
     }

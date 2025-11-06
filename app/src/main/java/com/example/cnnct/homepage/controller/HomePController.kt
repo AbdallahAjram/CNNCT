@@ -16,24 +16,26 @@ object HomePController {
 
     // ---------------- Real-time: listen to /chats + user-clears ----------------
     /**
-     * Emits your chats, but with per-chat "clear for me" applied:
-     * if userChats/{me}/chats/{chatId}.clearedBefore >= lastMessageTimestamp,
-     * we blank the preview (text/timestamp/sender/status).
+     * Emits your chats with client-side masks and filters:
+     * - "clear for me" mask: if userChats/{me}/chats/{chatId}.clearedBefore >= lastMessageTimestamp,
+     *   blank preview (text/timestamp/sender/status).
+     * - Hides chats where userChats/{me}/chats/{chatId}.hidden == true (client-side delete-for-me).
+     * - Hides chats where userChats/{me}/chats/{chatId}.archived == true (client-side archive).
      */
     fun listenMyChats(
         onResult: (List<ChatSummary>) -> Unit
     ): ListenerRegistration? {
         val uid = auth.currentUser?.uid ?: return null
 
-        // We combine two listeners:
-        //  - chats where I'm a member
-        //  - my per-chat meta (clearedBefore)
         var chats: List<ChatSummary> = emptyList()
         var clearedMap: Map<String, Timestamp> = emptyMap()
+        var hiddenMap: Map<String, Boolean> = emptyMap()
+        var archivedMap: Map<String, Boolean> = emptyMap()
 
         fun emit() {
             val masked = chats.map { applyClearMask(it, clearedMap[it.id]) }
-            onResult(sortChats(masked))
+            val visible = masked.filter { hiddenMap[it.id] != true && archivedMap[it.id] != true }
+            onResult(sortChats(visible))
         }
 
         val chatsReg = db.collection("chats")
@@ -47,26 +49,91 @@ object HomePController {
                 emit()
             }
 
-        val clearsReg = db.collection("userChats").document(uid)
+        val metaReg = db.collection("userChats").document(uid)
             .collection("chats")
             .addSnapshotListener { snap, err ->
                 if (err != null) {
-                    Log.w("HomePController", "listenMyChats(clears) error", err)
+                    Log.w("HomePController", "listenMyChats(meta) error", err)
                     return@addSnapshotListener
                 }
-                val map = mutableMapOf<String, Timestamp>()
+                val cMap = mutableMapOf<String, Timestamp>()
+                val hMap = mutableMapOf<String, Boolean>()
+                val aMap = mutableMapOf<String, Boolean>()
                 snap?.documents?.forEach { d ->
-                    (d.getTimestamp("clearedBefore"))?.let { map[d.id] = it }
+                    d.getTimestamp("clearedBefore")?.let { cMap[d.id] = it }
+                    hMap[d.id] = d.getBoolean("hidden") == true
+                    aMap[d.id] = d.getBoolean("archived") == true
                 }
-                clearedMap = map
+                clearedMap = cMap
+                hiddenMap = hMap
+                archivedMap = aMap
                 emit()
             }
 
-        // Return a handle that removes both
         return object : ListenerRegistration {
             override fun remove() {
                 try { chatsReg.remove() } catch (_: Exception) {}
-                try { clearsReg.remove() } catch (_: Exception) {}
+                try { metaReg.remove() } catch (_: Exception) {}
+            }
+        }
+    }
+
+    // ---------------- Real-time: archived-only list ----------------
+    /**
+     * Same merging logic, but returns ONLY chats where archived == true (and not hidden).
+     */
+    fun listenArchivedChats(
+        onResult: (List<ChatSummary>) -> Unit
+    ): ListenerRegistration? {
+        val uid = auth.currentUser?.uid ?: return null
+
+        var chats: List<ChatSummary> = emptyList()
+        var clearedMap: Map<String, Timestamp> = emptyMap()
+        var hiddenMap: Map<String, Boolean> = emptyMap()
+        var archivedMap: Map<String, Boolean> = emptyMap()
+
+        fun emit() {
+            val masked = chats.map { applyClearMask(it, clearedMap[it.id]) }
+            val archivedOnly = masked.filter { hiddenMap[it.id] != true && archivedMap[it.id] == true }
+            onResult(sortChats(archivedOnly))
+        }
+
+        val chatsReg = db.collection("chats")
+            .whereArrayContains("members", uid)
+            .addSnapshotListener { snap, err ->
+                if (err != null) {
+                    Log.e("HomePController", "listenArchivedChats(chats) error", err)
+                    onResult(emptyList()); return@addSnapshotListener
+                }
+                chats = snap?.documents?.mapNotNull { toChatSummary(it, uid) } ?: emptyList()
+                emit()
+            }
+
+        val metaReg = db.collection("userChats").document(uid)
+            .collection("chats")
+            .addSnapshotListener { snap, err ->
+                if (err != null) {
+                    Log.w("HomePController", "listenArchivedChats(meta) error", err)
+                    return@addSnapshotListener
+                }
+                val cMap = mutableMapOf<String, Timestamp>()
+                val hMap = mutableMapOf<String, Boolean>()
+                val aMap = mutableMapOf<String, Boolean>()
+                snap?.documents?.forEach { d ->
+                    d.getTimestamp("clearedBefore")?.let { cMap[d.id] = it }
+                    hMap[d.id] = d.getBoolean("hidden") == true
+                    aMap[d.id] = d.getBoolean("archived") == true
+                }
+                clearedMap = cMap
+                hiddenMap = hMap
+                archivedMap = aMap
+                emit()
+            }
+
+        return object : ListenerRegistration {
+            override fun remove() {
+                try { chatsReg.remove() } catch (_: Exception) {}
+                try { metaReg.remove() } catch (_: Exception) {}
             }
         }
     }
@@ -74,27 +141,29 @@ object HomePController {
     fun getMyChats(onResult: (List<ChatSummary>) -> Unit) {
         val uid = auth.currentUser?.uid ?: return onResult(emptyList())
 
-        // Fetch /chats and /userChats in parallel, then combine
         val chatsTask = db.collection("chats")
             .whereArrayContains("members", uid)
             .get()
 
-        val clearsTask = db.collection("userChats").document(uid)
+        val metaTask = db.collection("userChats").document(uid)
             .collection("chats").get()
 
-        Tasks.whenAllSuccess<QuerySnapshot>(listOf(chatsTask, clearsTask))
+        Tasks.whenAllSuccess<QuerySnapshot>(listOf(chatsTask, metaTask))
             .addOnSuccessListener { results ->
                 val chatsSnap = results[0]
-                val clearsSnap = results[1]
+                val metaSnap = results[1]
 
                 val chats = chatsSnap.documents.mapNotNull { toChatSummary(it, uid) }
 
-                val clearedMap = clearsSnap.documents
+                val clearedMap = metaSnap.documents
                     .mapNotNull { d -> d.getTimestamp("clearedBefore")?.let { d.id to it } }
                     .toMap()
+                val hiddenMap = metaSnap.documents.associate { d -> d.id to (d.getBoolean("hidden") == true) }
+                val archivedMap = metaSnap.documents.associate { d -> d.id to (d.getBoolean("archived") == true) }
 
                 val masked = chats.map { applyClearMask(it, clearedMap[it.id]) }
-                onResult(sortChats(masked))
+                val visible = masked.filter { hiddenMap[it.id] != true && archivedMap[it.id] != true }
+                onResult(sortChats(visible))
             }
             .addOnFailureListener { e ->
                 Log.e("HomePController", "getMyChats failed", e)
@@ -113,10 +182,6 @@ object HomePController {
         }
     }
 
-    /**
-     * If the user's clearedBefore is newer than (or equal to) the last message time,
-     * we blank the preview fields so the Home UI shows "No messages yet".
-     */
     private fun applyClearMask(s: ChatSummary, clearedBefore: Timestamp?): ChatSummary {
         if (clearedBefore == null) return s
         val lastMs = s.lastMessageTimestamp?.toDate()?.time ?: Long.MIN_VALUE
@@ -404,5 +469,51 @@ object HomePController {
 
     suspend fun unmuteChat(me: String, chatId: String) {
         setChatMutedUntil(me, chatId, null)
+    }
+
+    // ---------------- Client-side "delete for me" ----------------
+    suspend fun deleteChatForMe(me: String, chatId: String) {
+        val now = Timestamp.now()
+        val ref = db.collection("userChats").document(me)
+            .collection("chats").document(chatId)
+        ref.set(
+            mapOf(
+                "hidden" to true,
+                "clearedBefore" to now,
+                "updatedAt" to now
+            ),
+            SetOptions.merge()
+        ).await()
+    }
+
+    // ---------------- Client-side "archive" / "unarchive" ----------------
+    suspend fun setArchived(me: String, chatId: String, archived: Boolean) {
+        val now = Timestamp.now()
+
+        // Far future (Jan 1, 2100 UTC) as a Firebase Timestamp
+        val farFutureMs = java.util.GregorianCalendar(2100, 0, 1, 0, 0, 0).timeInMillis
+        val farFutureTs = com.google.firebase.Timestamp(java.util.Date(farFutureMs))
+
+        val data = if (archived) {
+            mapOf(
+                "archived" to true,
+                "archivedAt" to now,
+                "updatedAt" to now,
+                // auto-mute forever on archive — IMPORTANT: Timestamp, not Long
+                "mutedUntil" to farFutureTs
+            )
+        } else {
+            mapOf(
+                "archived" to FieldValue.delete(),
+                "archivedAt" to FieldValue.delete(),
+                "updatedAt" to now
+                // do NOT touch mutedUntil when unarchiving (mute stays)
+            )
+        }
+
+        db.collection("userChats").document(me)
+            .collection("chats").document(chatId)
+            .set(data, SetOptions.merge())
+            .await()
     }
 }

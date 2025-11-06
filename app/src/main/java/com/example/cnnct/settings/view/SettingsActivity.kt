@@ -57,8 +57,8 @@ class SettingsActivity : ComponentActivity() {
                     onNavigate = { option ->
                         when (controller.handleNavigation(option)) {
                             "account" -> startActivity(Intent(this, AccountActivity::class.java))
-                            "privacy" -> { /* TODO */ }
-                            "themes" -> { /* TODO */ }
+                            "privacy" -> {  startActivity(Intent(this, PrivacySettingsActivity::class.java)) }
+                            "archived" -> { startActivity(Intent(this, ArchiveSettingsActivity::class.java)) }
                             "notifications" -> startActivity(Intent(this, NotificationSettingsActivity::class.java))
                             "blocked" -> { /* TODO */ }
                         }

@@ -119,6 +119,12 @@ fun ChatListItem(
         }
     }
 
+    // 🔵 Unread logic mirrors ticks: last msg from other && not read && timestamp present (not masked)
+    val isUnread = chatSummary.lastMessageTimestamp != null &&
+            chatSummary.lastMessageSenderId != null &&
+            chatSummary.lastMessageSenderId != currentUserId &&
+            !chatSummary.lastMessageIsRead
+
     @Composable
     fun RowContent() {
         Box(Modifier.fillMaxWidth()) {
@@ -234,6 +240,24 @@ fun ChatListItem(
                                     color = tickColor,
                                     style = MaterialTheme.typography.bodySmall,
                                     modifier = Modifier.padding(start = 8.dp)
+                                )
+                            }
+                        }
+
+                        // 🔵 Unread badge (0/1 with current data model)
+                        if (isUnread) {
+                            Spacer(Modifier.width(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "1",
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    style = MaterialTheme.typography.labelSmall
                                 )
                             }
                         }

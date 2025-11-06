@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.AttachFile
@@ -51,7 +50,7 @@ fun SelectionTopBar(
     TopAppBar(
         navigationIcon = {
             IconButton(onClick = onClose) {
-                Icon(Icons.Filled.ArrowBack, contentDescription = "Close selection")
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close selection")
             }
         },
         title = { Text("$count selected") },
@@ -66,7 +65,7 @@ fun SelectionTopBar(
     )
 }
 
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TopBar(
     title: String,
@@ -75,12 +74,12 @@ fun TopBar(
     photoUrl: String?,
     onBack: () -> Unit,
     onCallClick: () -> Unit,
-    onHeaderClick: () -> Unit,
+    onHeaderClick: () -> Unit, // <-- FIX: regular lambda (not @Composable)
 
-    // NEW: to decide which actions to show
+    // decide which actions to show
     chatType: String = "private",
 
-    // NEW: menu callbacks (can be simple toasts if you want)
+    // menu callbacks
     onSearch: (() -> Unit)? = null,
     onClearChat: (() -> Unit)? = null,
     onBlockPeer: (() -> Unit)? = null,   // only for private
@@ -98,7 +97,7 @@ fun TopBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onHeaderClick() },
+                    .clickable { onHeaderClick() }, // now safe
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 AvatarWithStatus(size = 42.dp, presence = presence, photoUrl = photoUrl)

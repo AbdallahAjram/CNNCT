@@ -27,5 +27,9 @@ data class ChatSummary(
     var blockedByOther: Boolean? = null,
 
     // (optional, future-proof)
-    var groupPhotoUrl: String? = null
+    var groupPhotoUrl: String? = null,
+
+    // 🔵 Computed locally (not persisted): badge count for unread on Home row.
+    // With the current data model, this will effectively be 0 or 1.
+    var unreadCount: Int = 0
 )

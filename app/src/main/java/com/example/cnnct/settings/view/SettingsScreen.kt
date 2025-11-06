@@ -74,7 +74,7 @@ fun SettingsScreen(
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
-            val rows = listOf("Account", "Privacy", "Notifications", "Themes", "Blocked Accounts")
+            val rows = listOf("Account", "Privacy", "Notifications", "Archived Chats", "Blocked Accounts")
             rows.forEachIndexed { idx, label ->
                 SettingRow(
                     label = label,

@@ -106,13 +106,12 @@ object GroupController {
         }
         ref.set(base).await()
 
-        // 2) Optional icon upload (members-only path, allowed by your Storage rules)
+        // 2) Optional icon upload
         if (localIconUri != null) {
             val fileName = "group_${System.currentTimeMillis()}.jpg"
             val path = "chat_uploads/${ref.id}/icons/$fileName"
             val iconRef = storage.reference.child(path)
 
-            // be lenient; default to jpeg
             val contentType = when {
                 localIconUri.toString().endsWith(".png", true) -> "image/png"
                 localIconUri.toString().endsWith(".webp", true) -> "image/webp"
@@ -123,7 +122,6 @@ object GroupController {
             iconRef.putFile(localIconUri, md).await()
             val photoUrl = iconRef.downloadUrl.await().toString()
 
-            // Write groupPhotoUrl + updatedAt
             ref.set(
                 mapOf(
                     "groupPhotoUrl" to photoUrl,

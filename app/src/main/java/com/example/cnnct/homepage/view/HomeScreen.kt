@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Call
@@ -84,7 +85,7 @@ fun HomeScreen(callsController: CallsController, onLogout: () -> Unit) {
 
         // start mute sync
         MuteStore.start()
-        val listener: () -> Unit = { muteVersion++ }   // ✅ keeps list reacting to mute changes
+        val listener: () -> Unit = { muteVersion++ }   // keeps list reacting to mute changes
         MuteStore.addListener(listener)
 
         onDispose {
@@ -131,6 +132,12 @@ fun HomeScreen(callsController: CallsController, onLogout: () -> Unit) {
     var pendingBlockPeerId by remember { mutableStateOf<String?>(null) }
     var pendingBlockChatId by remember { mutableStateOf<String?>(null) }
     var isPendingBlock by remember { mutableStateOf(false) }
+
+    // ===== Confirmation dialog state for delete-for-me =====
+    var showDeleteDialog by remember { mutableStateOf(false) }
+
+    // ===== Confirmation dialog for archive =====
+    var showArchiveDialog by remember { mutableStateOf(false) }
 
     // Block / Unblock Firestore writes
     fun blockPeer(chatId: String, peerId: String) {
@@ -303,6 +310,18 @@ fun HomeScreen(callsController: CallsController, onLogout: () -> Unit) {
         }
     }
 
+    // 🔵 Unread chats count for bottom badge: last msg from other && not read && has timestamp
+    val unreadChatsCount by remember(chatSummaries, currentUserId) {
+        mutableStateOf(
+            chatSummaries.count {
+                it.lastMessageTimestamp != null &&
+                        it.lastMessageSenderId != null &&
+                        it.lastMessageSenderId != currentUserId &&
+                        !it.lastMessageIsRead
+            }
+        )
+    }
+
     // ===== UI =====
     Scaffold(
         topBar = {
@@ -373,10 +392,15 @@ fun HomeScreen(callsController: CallsController, onLogout: () -> Unit) {
                             }
                         }
 
-                        IconButton(onClick = {
-                            Toast.makeText(context, "Delete (placeholder)", Toast.LENGTH_SHORT).show()
-                            clearSelection()
-                        }) { Icon(Icons.Default.Delete, contentDescription = "Delete") }
+                        // 🗃️ ARCHIVE with confirmation
+                        IconButton(onClick = { showArchiveDialog = true }) {
+                            Icon(Icons.Default.Archive, contentDescription = "Archive")
+                        }
+
+                        // 🔴 DELETE with confirmation dialog (client-side delete-for-me)
+                        IconButton(onClick = { showDeleteDialog = true }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete")
+                        }
 
                         // Block/Unblock only when exactly one chat is selected and it's private
                         if (selectedCount == 1) {
@@ -416,6 +440,15 @@ fun HomeScreen(callsController: CallsController, onLogout: () -> Unit) {
                                 }
                                 DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                                     DropdownMenuItem(
+                                        text = { Text("Archived") },
+                                        onClick = {
+                                            expanded = false
+                                            context.startActivity(
+                                                Intent(context, com.example.cnnct.settings.view.ArchiveSettingsActivity::class.java)
+                                            )
+                                        }
+                                    )
+                                    DropdownMenuItem(
                                         text = { Text("Settings") },
                                         onClick = {
                                             expanded = false
@@ -448,7 +481,7 @@ fun HomeScreen(callsController: CallsController, onLogout: () -> Unit) {
                 ) { Icon(Icons.Default.Add, contentDescription = "New chat") }
             }
         },
-        bottomBar = { if (!selectionMode) BottomNavigationBar(currentScreen = "chats") }
+        bottomBar = { if (!selectionMode) BottomNavigationBar(currentScreen = "chats", unreadChatsCount = unreadChatsCount) }
     ) { innerPadding ->
         Column(modifier = Modifier.padding(innerPadding)) {
             OutlinedTextField(
@@ -545,7 +578,7 @@ fun HomeScreen(callsController: CallsController, onLogout: () -> Unit) {
                     }
                 },
                 blockedPeers = blockedPeers,
-                // 👇 this lambda lets rows render a mute badge and will recompose when muteVersion changes
+                // this lambda lets rows render a mute badge and will recompose when muteVersion changes
                 isMuted = { chatId -> muteVersion /* read to subscribe */; MuteStore.isMuted(chatId) }
             )
         }
@@ -582,6 +615,83 @@ fun HomeScreen(callsController: CallsController, onLogout: () -> Unit) {
                 TextButton(onClick = { showBlockDialog = false }) {
                     Text("Cancel")
                 }
+            }
+        )
+    }
+
+    // 🗑️ Confirm Delete (client-side "delete for me")
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete chat?") },
+            text = { Text("This hides the chat for you and clears the preview. Others still keep the chat.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteDialog = false
+                        // apply delete-for-me on all selected chats
+                        val ids = selectedIds.toList()
+                        scope.launch {
+                            var ok = 0
+                            ids.forEach { chatId ->
+                                try {
+                                    HomePController.deleteChatForMe(currentUserId, chatId)
+                                    ok++
+                                } catch (e: Exception) {
+                                    Log.e("HomeScreen", "deleteChatForMe failed for $chatId", e)
+                                }
+                            }
+                            if (ok > 0) {
+                                Toast.makeText(context, "Deleted $ok chat(s)", Toast.LENGTH_SHORT).show()
+                            }
+                            clearSelection()
+                        }
+                    }
+                ) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // 🗃️ Confirm Archive
+    if (showArchiveDialog) {
+        AlertDialog(
+            onDismissRequest = { showArchiveDialog = false },
+            title = { Text("Archive chats?") },
+            text = { Text("Chats will move to Archived and disappear from your home list.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showArchiveDialog = false
+                        val ids = selectedIds.toList()
+                        scope.launch {
+                            var ok = 0
+                            val farFuture = java.util.GregorianCalendar(2100, 0, 1, 0, 0, 0).timeInMillis
+
+                            ids.forEach { chatId ->
+                                try {
+                                    // 🔊 local instant effect
+                                    MuteStore.prime(chatId, farFuture)
+
+                                    // server-side: archive + mutedUntil in one write
+                                    HomePController.setArchived(currentUserId, chatId, archived = true)
+                                    ok++
+                                } catch (e: Exception) {
+                                    Log.e("HomeScreen", "archive failed for $chatId", e)
+                                }
+                            }
+                            if (ok > 0) Toast.makeText(context, "Archived $ok chat(s)", Toast.LENGTH_SHORT).show()
+                            clearSelection()
+                        }
+
+
+                    }
+                ) { Text("Archive") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showArchiveDialog = false }) { Text("Cancel") }
             }
         )
     }
@@ -624,14 +734,14 @@ fun ChatListView(
             items(filtered, key = { it.id }) { chat ->
                 val other = if (chat.type == "private") chat.members.firstOrNull { it != currentUserId } else null
 
-                // ✅ choose the correct photo URL to pass down
+                // choose the correct photo URL to pass down
                 val photoUrlForRow: String? = when (chat.type) {
                     "private" -> other?.let { userPhotoMap[it] }
                     "group" -> chat.groupPhotoUrl
                     else -> null
                 }
 
-                // 🔴 blocked indicator logic
+                // blocked indicator logic
                 val blockedForMe = (other != null && blockedPeers.contains(other)) ||
                         (chat.iBlockedPeer == true) ||
                         (chat.blockedByOther == true)
@@ -653,7 +763,7 @@ fun ChatListView(
                         onClick = null,
                         onlineMap = onlineMap,
                         blockedUserIds = blockedSetForRow,
-                        photoUrl = photoUrlForRow,      // ✅ use groupPhotoUrl when group
+                        photoUrl = photoUrlForRow,      // use groupPhotoUrl when group
                         selectionMode = selectionMode,
                         selected = isSelected(chat.id),
                         muted = isMuted(chat.id)
@@ -666,11 +776,21 @@ fun ChatListView(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BottomNavigationBar(currentScreen: String = "chats") {
+fun BottomNavigationBar(currentScreen: String = "chats", unreadChatsCount: Int = 0) {
     val context = LocalContext.current
     NavigationBar {
         NavigationBarItem(
-            icon = { Icon(Icons.Default.Chat, contentDescription = "Chats") },
+            icon = {
+                BadgedBox(
+                    badge = {
+                        if (unreadChatsCount > 0) {
+                            Badge { Text(unreadChatsCount.toString()) }
+                        }
+                    }
+                ) {
+                    Icon(Icons.Default.Chat, contentDescription = "Chats")
+                }
+            },
             label = { Text("Chats") },
             selected = currentScreen == "chats",
             onClick = { if (currentScreen != "chats") context.startActivity(Intent(context, HomeActivity::class.java)) }

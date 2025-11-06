@@ -48,8 +48,6 @@ import com.canhub.cropper.CropImageContract
 import com.canhub.cropper.CropImageContractOptions
 import com.canhub.cropper.CropImageOptions
 import com.canhub.cropper.CropImageView
-import androidx.core.content.FileProvider
-import java.io.File
 
 // Palette
 private val Lavender = Color(0xFFF1EAF5)
@@ -88,34 +86,26 @@ fun AccountScreenContent(
     /* -------------------- Cropper -------------------- */
 
     val cropLauncher = rememberLauncherForActivityResult(CropImageContract()) { result ->
-        if (result.isSuccessful) {
-            val croppedUri = result.uriContent ?: return@rememberLauncherForActivityResult
-            scope.launch {
+        scope.launch {
+            if (result.isSuccessful) {
+                val croppedUri = result.uriContent ?: return@launch
                 try {
                     snackbarHostState.currentSnackbarData?.dismiss()
-                    snackbarHostState.showSnackbar("Uploading photo...")
-
-                    // Upload off the main thread
+                    snackbarHostState.showSnackbar("Uploading photo…")
                     withContext(Dispatchers.IO) {
                         AccountPhotoController.uploadAndSaveAvatar(croppedUri)
                     }
-
-                    // Then refresh
+                    // Refresh local profile (and UI)
                     profile = controller.getProfile()
                     snackbarHostState.currentSnackbarData?.dismiss()
                     snackbarHostState.showSnackbar("Profile photo updated")
                 } catch (e: Exception) {
-                    android.util.Log.e("Account", "Avatar upload failed", e)
                     snackbarHostState.currentSnackbarData?.dismiss()
                     snackbarHostState.showSnackbar("Upload failed: ${e.message}")
                 }
-            }
-        } else {
-            val err = result.error
-            scope.launch {
-                android.util.Log.e("Account", "Crop failed", err)
+            } else {
                 snackbarHostState.currentSnackbarData?.dismiss()
-                snackbarHostState.showSnackbar("Crop failed: ${err?.message ?: "unknown"}")
+                snackbarHostState.showSnackbar("Crop canceled")
             }
         }
     }
@@ -124,27 +114,19 @@ fun AccountScreenContent(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { pickedUri: Uri? ->
         pickedUri ?: return@rememberLauncherForActivityResult
-
         val options = CropImageOptions(
-            cropShape = CropImageView.CropShape.OVAL, // circle mask
+            cropShape = CropImageView.CropShape.OVAL, // circular mask
             aspectRatioX = 1,
             aspectRatioY = 1,
             fixAspectRatio = true,
             guidelines = CropImageView.Guidelines.OFF,
-
-            // Output encoding (still supported)
             outputCompressFormat = Bitmap.CompressFormat.JPEG,
             outputCompressQuality = 90,
-
-            // Toolbar style
             activityTitle = "Adjust",
             toolbarColor = ContextCompat.getColor(context, R.color.black),
             toolbarTitleColor = ContextCompat.getColor(context, android.R.color.white),
-
-            // Show "Done" label
             cropMenuCropButtonTitle = "Done"
         )
-
         cropLauncher.launch(
             CropImageContractOptions(
                 uri = pickedUri,
@@ -153,15 +135,15 @@ fun AccountScreenContent(
         )
     }
 
-
     /* -------------------- Load profile once -------------------- */
-
     LaunchedEffect(Unit) {
         runCatching { controller.getProfile() }
             .onSuccess {
                 profile = it
                 nameText = it.displayName
                 aboutText = it.about.orEmpty()
+                nameOriginal = nameText
+                aboutOriginal = aboutText
             }
             .onFailure { error = it.message }
         loading = false
@@ -203,7 +185,7 @@ fun AccountScreenContent(
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {
-                        coil.compose.AsyncImage(
+                        AsyncImage(
                             model = photoUrl,
                             contentDescription = "Profile picture",
                             modifier = Modifier.fillMaxSize()
@@ -213,16 +195,14 @@ fun AccountScreenContent(
 
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "Edit",
+                    text = "Edit photo",
                     color = AccentGreen,
                     fontSize = 14.sp,
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
                         .clickable {
                             pickPhotoLauncher.launch(
-                                PickVisualMediaRequest(
-                                    ActivityResultContracts.PickVisualMedia.ImageOnly
-                                )
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                             )
                         }
                         .padding(horizontal = 8.dp, vertical = 4.dp)
@@ -243,25 +223,34 @@ fun AccountScreenContent(
                         value = nameText,
                         onValueChange = { nameText = it },
                         isEditing = nameEditing,
+                        canSave = nameEditing && nameText.trim().isNotEmpty() && nameText.trim() != nameOriginal.trim(),
                         onStartEdit = {
-                            nameOriginal = nameText
                             nameEditing = true
                             nameFocusRequester.requestFocus()
                             keyboardController?.show()
                         },
                         onSave = {
+                            val newName = nameText.trim()
+                            if (newName.isEmpty() || newName == nameOriginal.trim()) {
+                                nameEditing = false
+                                focusManager.clearFocus()
+                                keyboardController?.hide()
+                                return@EditableBubble
+                            }
                             scope.launch {
-                                runCatching { controller.updateDisplayName(nameText.trim()) }
-                                    .onSuccess {
-                                        profile = controller.getProfile()
-                                        snackbarHostState.currentSnackbarData?.dismiss()
-                                        snackbarHostState.showSnackbar("Display name updated")
-                                    }
-                                    .onFailure {
-                                        snackbarHostState.currentSnackbarData?.dismiss()
-                                        snackbarHostState.showSnackbar("Failed: ${it.message}")
-                                        nameText = nameOriginal
-                                    }
+                                snackbarHostState.currentSnackbarData?.dismiss()
+                                snackbarHostState.showSnackbar("Saving…")
+                                val result = runCatching { controller.updateDisplayName(newName) }
+                                snackbarHostState.currentSnackbarData?.dismiss()
+                                if (result.isSuccess) {
+                                    // Reflect locally right away
+                                    profile = profile?.copy(displayName = newName)
+                                    nameOriginal = newName
+                                    snackbarHostState.showSnackbar("Display name updated")
+                                } else {
+                                    nameText = nameOriginal
+                                    snackbarHostState.showSnackbar("Failed: ${result.exceptionOrNull()?.message}")
+                                }
                             }
                             nameEditing = false
                             focusManager.clearFocus()
@@ -284,25 +273,33 @@ fun AccountScreenContent(
                         value = aboutText,
                         onValueChange = { aboutText = it },
                         isEditing = aboutEditing,
+                        canSave = aboutEditing && aboutText.trim() != aboutOriginal.trim(),
                         onStartEdit = {
-                            aboutOriginal = aboutText
                             aboutEditing = true
                             aboutFocusRequester.requestFocus()
                             keyboardController?.show()
                         },
                         onSave = {
+                            val newAbout = aboutText.trim()
+                            if (newAbout == aboutOriginal.trim()) {
+                                aboutEditing = false
+                                focusManager.clearFocus()
+                                keyboardController?.hide()
+                                return@EditableBubble
+                            }
                             scope.launch {
-                                runCatching { controller.updateAbout(aboutText.trim()) }
-                                    .onSuccess {
-                                        profile = controller.getProfile()
-                                        snackbarHostState.currentSnackbarData?.dismiss()
-                                        snackbarHostState.showSnackbar("About updated")
-                                    }
-                                    .onFailure {
-                                        snackbarHostState.currentSnackbarData?.dismiss()
-                                        snackbarHostState.showSnackbar("Failed: ${it.message}")
-                                        aboutText = aboutOriginal
-                                    }
+                                snackbarHostState.currentSnackbarData?.dismiss()
+                                snackbarHostState.showSnackbar("Saving…")
+                                val result = runCatching { controller.updateAbout(newAbout) }
+                                snackbarHostState.currentSnackbarData?.dismiss()
+                                if (result.isSuccess) {
+                                    profile = profile?.copy(about = newAbout)
+                                    aboutOriginal = newAbout
+                                    snackbarHostState.showSnackbar("About updated")
+                                } else {
+                                    aboutText = aboutOriginal
+                                    snackbarHostState.showSnackbar("Failed: ${result.exceptionOrNull()?.message}")
+                                }
                             }
                             aboutEditing = false
                             focusManager.clearFocus()
@@ -350,6 +347,7 @@ private fun EditableBubble(
     value: String,
     onValueChange: (String) -> Unit,
     isEditing: Boolean,
+    canSave: Boolean,
     onStartEdit: () -> Unit,
     onSave: () -> Unit,
     onCancel: () -> Unit,
@@ -373,10 +371,11 @@ private fun EditableBubble(
                 .padding(vertical = 4.dp)
                 .focusRequester(focusRequester)
                 .onFocusChanged { state ->
+                    // Only cancel if we’re editing AND we actually lost focus (tap out)
                     if (isEditing && !state.isFocused) onCancel()
                 },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { onSave() }),
+            keyboardActions = KeyboardActions(onDone = { if (canSave) onSave() else onCancel() }),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedContainerColor = FieldGray,
                 unfocusedContainerColor = FieldGray,
@@ -389,22 +388,12 @@ private fun EditableBubble(
                 disabledBorderColor = Color.Transparent
             )
         )
-        IconButton(onClick = { if (isEditing) onSave() else onStartEdit() }) {
+        IconButton(onClick = { if (isEditing) { if (canSave) onSave() else onCancel() } else onStartEdit() }) {
             Icon(
                 imageVector = if (isEditing) Icons.Default.Check else Icons.Default.Edit,
                 contentDescription = if (isEditing) "Save" else "Edit",
-                tint = AccentGreen
+                tint = if (isEditing && canSave) AccentGreen else AccentGreen.copy(alpha = if (isEditing) 0.5f else 1f)
             )
         }
     }
-}
-
-/** Create a cache Uri via FileProvider; used as crop output destination. */
-private fun createCacheUriForCrop(context: android.content.Context, fileName: String): Uri {
-    val file = File(context.cacheDir, fileName)
-    return FileProvider.getUriForFile(
-        context,
-        "${context.packageName}.fileprovider",
-        file
-    )
 }

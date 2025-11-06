@@ -2,6 +2,8 @@ package com.cnnct.chat.mvc.view
 
 import android.content.Intent
 import android.os.Build
+import android.os.SystemClock
+import android.text.format.DateFormat
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -9,7 +11,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.imePadding
@@ -20,9 +21,24 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.*
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,14 +51,13 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.cnnct.chat.mvc.controller.ChatController
 import com.cnnct.chat.mvc.model.Message
 import com.cnnct.chat.mvc.model.MessageType
-import com.example.cnnct.chat.view.GroupInfoActivity
-import com.example.cnnct.chat.view.PersonInfoActivity
+import com.example.cnnct.chat.controller.ChatNav
+import com.google.firebase.Timestamp
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -74,11 +89,15 @@ fun ChatScreen(
     iBlockedPeer: Boolean = false,
     blockedByOther: Boolean = false,
 
+    // Group-only mute flag
+    mutedByAdmin: Boolean = false,
+
     // timestamp after which messages are visible (per-user clear)
     clearedBeforeMs: Long? = null,
 
     blockedUserIds: Set<String> = emptySet(),
     onlineMap: Map<String, Long?> = emptyMap(),
+
     onBack: () -> Unit = {},
     onCallClick: () -> Unit = {},
 
@@ -91,6 +110,17 @@ fun ChatScreen(
 ) {
     val ctx = LocalContext.current
     val messagesRaw by controller.messages.collectAsState()
+    val memberMetaLive by controller.memberMeta.collectAsState()
+
+    val idToTime by remember(messagesRaw) {
+        mutableStateOf(
+            messagesRaw.mapNotNull { m ->
+                val t = m.createdAt?.toDate()?.time ?: m.createdAtClient?.toDate()?.time
+                t?.let { m.id to it }
+            }.toMap()
+        )
+    }
+
     val listState = rememberLazyListState()
     val focusManager = LocalFocusManager.current
 
@@ -153,9 +183,10 @@ fun ChatScreen(
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showAttachDialog by remember { mutableStateOf(false) }
 
-    // NEW: confirmation dialogs
+    // Confirm dialogs
     var showClearDialog by remember { mutableStateOf(false) }
     var showBlockDialog by remember { mutableStateOf(false) }
+    var showLeaveDialog by remember { mutableStateOf(false) }
 
     data class ViewMedia(val url: String, val name: String?)
     var viewer by remember { mutableStateOf<ViewMedia?>(null) }
@@ -187,14 +218,12 @@ fun ChatScreen(
         )
     }
 
-    fun metaOf(uid: String): Map<*, *>? = (memberMeta as? Map<*, *>)?.get(uid) as? Map<*, *>
+    fun metaOf(uid: String): Map<*, *>? =
+        (memberMetaLive as? Map<*, *>)?.get(uid) as? Map<*, *>
+
     fun openedAtMs(uid: String): Long? =
-        (metaOf(uid)?.get("lastOpenedAt") as? com.google.firebase.Timestamp)?.toDate()?.time
-    fun msgTimeMsById(id: String?, msgs: List<Message>): Long? {
-        if (id.isNullOrBlank()) return null
-        val m = msgs.firstOrNull { it.id == id } ?: return null
-        return m.createdAt?.toDate()?.time ?: m.createdAtClient?.toDate()?.time
-    }
+        (metaOf(uid)?.get("lastOpenedAt") as? Timestamp)?.toDate()?.time
+    fun msgTimeMsById(id: String?): Long? = if (id.isNullOrBlank()) null else idToTime[id]
 
     fun presenceFor(uid: String?): Presence {
         if (uid == null) return Presence.Offline
@@ -204,6 +233,10 @@ fun ChatScreen(
         return if (last != null && now - last <= 2.minutes.inWholeMilliseconds)
             Presence.Online else Presence.Offline
     }
+
+    // local helper (was referenced but not defined)
+    fun Message.sentAtMs(): Long =
+        this.createdAt?.toDate()?.time ?: this.createdAtClient?.toDate()?.time ?: 0L
 
     DisposableEffect(chatId) {
         controller.openChat(chatId)
@@ -251,6 +284,21 @@ fun ChatScreen(
         derivedStateOf { selected.isNotEmpty() && eligibility.okIds.size == selected.size }
     }
 
+    // ---------- local header tap debounce ----------
+    var lastHeaderTapAt by remember { mutableLongStateOf(0L) }
+    fun safeOpenHeader() {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastHeaderTapAt < 700L) return
+        lastHeaderTapAt = now
+
+        if (chatType == "private" && otherUserId != null) {
+            ChatNav.openPeerProfile(ctx, otherUserId)
+        } else if (chatType == "group") {
+            ChatNav.openGroupInfo(ctx, chatId)
+        }
+        // Do not call onHeaderClick() here if it navigates elsewhere.
+    }
+
     Scaffold(
         topBar = {
             if (isSearchActive) {
@@ -292,29 +340,30 @@ fun ChatScreen(
                     onDeleteClick = { showDeleteDialog = true }
                 )
             } else {
-                // FIX: Use LaunchedEffect to handle focus when search becomes active
                 var triggerFocus by remember { mutableStateOf(false) }
 
-                val doSearch = {
+                val doSearch: () -> Unit = {
                     isSearchActive = true
                     triggerFocus = true
                 }
-
-                val doClear = {
+                val doClear: () -> Unit = {
                     if (onClearChat != null) showClearDialog = true
                     else Toast.makeText(ctx, "Clear chat (placeholder)", Toast.LENGTH_SHORT).show()
                 }
-                val doBlock = {
+                val doBlock: () -> Unit = {
                     if (onBlockPeer != null) showBlockDialog = true
                     else Toast.makeText(ctx, "Block (placeholder)", Toast.LENGTH_SHORT).show()
                 }
-                val doLeave = onLeaveGroup ?: { Toast.makeText(ctx, "Leave group (placeholder)", Toast.LENGTH_SHORT).show() }
+                val doLeave: () -> Unit = {
+                    if (onLeaveGroup != null) showLeaveDialog = true
+                    else Toast.makeText(ctx, "Leave group (placeholder)", Toast.LENGTH_SHORT).show()
+                }
 
-                // Handle focus when search is triggered
+
                 if (triggerFocus) {
                     LaunchedEffect(Unit) {
                         searchFocusRequester.requestFocus()
-                        triggerFocus = false // Reset the trigger
+                        triggerFocus = false
                     }
                 }
 
@@ -325,20 +374,7 @@ fun ChatScreen(
                     photoUrl = resolvedHeaderPhoto,
                     onBack = onBack,
                     onCallClick = onCallClick,
-                    onHeaderClick = {
-                        if (chatType == "private" && otherUserId != null) {
-                            ctx.startActivity(
-                                Intent(ctx, PersonInfoActivity::class.java)
-                                    .putExtra("uid", otherUserId)
-                            )
-                        } else if (chatType == "group") {
-                            ctx.startActivity(
-                                Intent(ctx, GroupInfoActivity::class.java)
-                                    .putExtra("chatId", chatId)
-                            )
-                        }
-                        onHeaderClick()
-                    },
+                    onHeaderClick = { safeOpenHeader() },
                     chatType = chatType,
                     onSearch = doSearch,
                     onClearChat = doClear,
@@ -348,9 +384,16 @@ fun ChatScreen(
             }
         },
         bottomBar = {
-            if (!inSelection && editTargetId == null && !isSearchActive) {
+            // Group mute only — composer replaced by info bar
+            if (mutedByAdmin && chatType == "group") {
+                MutedBottomInfoBar()
+            } else if (!inSelection && editTargetId == null && !isSearchActive) {
                 MessageInput(
                     onSend = { text ->
+                        if (mutedByAdmin && chatType == "group") {
+                            Toast.makeText(ctx, "You’re muted by an admin", Toast.LENGTH_SHORT).show()
+                            return@MessageInput
+                        }
                         when {
                             iBlockedPeer -> {
                                 Toast.makeText(ctx, "You blocked this user", Toast.LENGTH_SHORT).show()
@@ -364,6 +407,10 @@ fun ChatScreen(
                         controller.sendText(chatId, currentUserId, text)
                     },
                     onAttach = {
+                        if (mutedByAdmin && chatType == "group") {
+                            Toast.makeText(ctx, "You’re muted by an admin", Toast.LENGTH_SHORT).show()
+                            return@MessageInput
+                        }
                         when {
                             iBlockedPeer -> {
                                 Toast.makeText(ctx, "You blocked this user", Toast.LENGTH_SHORT).show()
@@ -388,6 +435,7 @@ fun ChatScreen(
                 .background(Color(0xFFF1EAF5))
         ) {
             Column(Modifier.fillMaxSize()) {
+                // Banners (top of list)
                 when {
                     iBlockedPeer -> {
                         BlockBanner(
@@ -404,6 +452,14 @@ fun ChatScreen(
                         )
                     }
                 }
+                if (mutedByAdmin && chatType == "group") {
+                    // Muted info banner in blue (group only)
+                    BlockBanner(
+                        text = "🔇 You’re muted by an admin. You can’t send messages.",
+                        bg = MaterialTheme.colorScheme.primaryContainer,
+                        fg = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
 
                 val screenWidth = LocalConfiguration.current.screenWidthDp.dp
                 val maxBubbleWidth = screenWidth * 0.78f
@@ -415,7 +471,9 @@ fun ChatScreen(
                         .fillMaxWidth()
                         .weight(1f)
                         .padding(horizontal = 8.dp),
-                    contentPadding = PaddingValues(bottom = if (editTargetId == null && !isSearchActive) 80.dp else 16.dp)
+                    contentPadding = PaddingValues(
+                        bottom = if (editTargetId == null && !isSearchActive && !(mutedByAdmin && chatType == "group")) 80.dp else 16.dp
+                    )
                 ) {
                     itemsIndexed(groups) { gIndex, g ->
                         val firstMsg = messages[g.start]
@@ -480,15 +538,15 @@ fun ChatScreen(
                                         }
 
                                         val bubbleColor = when {
-                                            isCurrentSearchMatch -> Color(0xFFCCE5FF) // Highlight current search match
-                                            isSearchMatch -> Color(0xFFEAF3FF) // Highlight all search matches
+                                            isCurrentSearchMatch -> Color(0xFFCCE5FF)
+                                            isSearchMatch -> Color(0xFFEAF3FF)
                                             m.deleted -> MaterialTheme.colorScheme.surfaceVariant
                                             me -> Color(0xFF7A3EB1)
                                             else -> Color(0xFF2D7FF9)
                                         }
 
                                         val textColor = when {
-                                            isCurrentSearchMatch || isSearchMatch -> Color.Black // Dark text for highlighted backgrounds
+                                            isCurrentSearchMatch || isSearchMatch -> Color.Black
                                             m.deleted -> MaterialTheme.colorScheme.onSurfaceVariant
                                             else -> Color.White
                                         }
@@ -532,7 +590,6 @@ fun ChatScreen(
                                                     } else if (m.type == MessageType.text) {
                                                         val messageText = m.text.orElse("")
                                                         if (isSearchMatch && searchQuery.isNotBlank()) {
-                                                            // Highlight search terms in message text
                                                             HighlightedText(
                                                                 text = messageText,
                                                                 query = searchQuery,
@@ -562,8 +619,7 @@ fun ChatScreen(
                                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                                         val displayTs = m.createdAt ?: m.createdAtClient
                                                         val time = displayTs?.toDate()?.let {
-                                                            android.text.format.DateFormat
-                                                                .format("h:mm a", it).toString()
+                                                            DateFormat.format("h:mm a", it).toString()
                                                         } ?: "…"
                                                         val timeSuffix =
                                                             if (m.editedAt != null && !m.deleted) " (edited)" else ""
@@ -575,41 +631,40 @@ fun ChatScreen(
                                                             else textColor.copy(alpha = 0.75f),
                                                             style = MaterialTheme.typography.labelSmall
                                                         )
-
                                                         if (me && !m.deleted) {
                                                             Spacer(Modifier.width(6.dp))
                                                             val createdMs = m.sentAtMs()
+
                                                             val delivered: Boolean
                                                             val read: Boolean
 
                                                             if (chatType == "private") {
-                                                                delivered = createdMs != null &&
-                                                                        (otherLastOpenedAtMs != null && otherLastOpenedAtMs >= createdMs)
-                                                                val lastReadCutoff =
-                                                                    msgTimeMsById(otherLastReadId, messages)
-                                                                read = createdMs != null && lastReadCutoff != null &&
-                                                                        createdMs <= lastReadCutoff
+                                                                val otherMeta = metaOf(otherUserId ?: "")
+                                                                val readId = otherMeta?.get("lastReadMessageId") as? String
+                                                                val readCutoff = msgTimeMsById(readId)
+                                                                val openedAt = (otherMeta?.get("lastOpenedAt") as? Timestamp)?.toDate()?.time
+                                                                val openedOk = createdMs != 0L && openedAt != null && openedAt >= createdMs
+                                                                val readOk = createdMs != 0L && readCutoff != null && readCutoff >= createdMs
+                                                                delivered = openedOk || readOk
+                                                                read = readOk
                                                             } else if (chatType == "group") {
                                                                 val others = memberIds.filter { it != currentUserId }
-                                                                delivered = createdMs != null && others.all { uid ->
-                                                                    val opened = openedAtMs(uid)
-                                                                    opened != null && opened >= createdMs
-                                                                }
-                                                                read = createdMs != null && others.all { uid ->
-                                                                    val readId = metaOf(uid)?.get("lastReadMessageId") as? String
-                                                                    val cutoff = msgTimeMsById(readId, messages)
+                                                                val readAll = createdMs != 0L && others.all { uid ->
+                                                                    val rid = (metaOf(uid)?.get("lastReadMessageId") as? String)
+                                                                    val cutoff = msgTimeMsById(rid)
                                                                     cutoff != null && cutoff >= createdMs
                                                                 }
+                                                                val openedAll = createdMs != 0L && others.all { uid ->
+                                                                    val o = (metaOf(uid)?.get("lastOpenedAt") as? Timestamp)?.toDate()?.time
+                                                                    o != null && o >= createdMs
+                                                                }
+                                                                delivered = openedAll || readAll
+                                                                read = readAll
                                                             } else {
                                                                 delivered = false
                                                                 read = false
                                                             }
-
-                                                            Ticks(
-                                                                sent = createdMs != null,
-                                                                delivered = delivered,
-                                                                read = read
-                                                            )
+                                                            Ticks(sent = createdMs != 0L, delivered = delivered, read = read)
                                                         }
                                                     }
                                                 }
@@ -764,6 +819,29 @@ fun ChatScreen(
                         }
                     )
                 }
+
+                if (showLeaveDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showLeaveDialog = false },
+                        title = { Text("Leave group?") },
+                        text = {
+                            Text(
+                                "You won't receive new messages from this group. " +
+                                        "You can rejoin later if someone adds you back."
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                showLeaveDialog = false
+                                onLeaveGroup?.invoke()
+                            }) { Text("Leave") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showLeaveDialog = false }) { Text("Cancel") }
+                        }
+                    )
+                }
+
             }
         }
     }
@@ -787,7 +865,6 @@ private fun SearchTopBar(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // Search field - using basic styling
                 TextField(
                     value = searchQuery,
                     onValueChange = onSearchQueryChange,
@@ -796,12 +873,10 @@ private fun SearchTopBar(
                     modifier = Modifier
                         .weight(1f)
                         .focusRequester(focusRequester),
-                    // Use default colors without custom configuration
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { /* Handle done */ })
                 )
 
-                // Match counter and navigation
                 if (matchCount > 0) {
                     Text(
                         text = "${currentMatchIndex + 1}/$matchCount",
@@ -815,9 +890,8 @@ private fun SearchTopBar(
                         enabled = matchCount > 0
                     ) {
                         Icon(
-                            Icons.Default.KeyboardArrowUp,
-                            contentDescription = "Previous match",
-                            tint = if (matchCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                            Icons.Filled.KeyboardArrowUp,
+                            contentDescription = "Previous match"
                         )
                     }
 
@@ -826,9 +900,8 @@ private fun SearchTopBar(
                         enabled = matchCount > 0
                     ) {
                         Icon(
-                            Icons.Default.KeyboardArrowDown,
-                            contentDescription = "Next match",
-                            tint = if (matchCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                            Icons.Filled.KeyboardArrowDown,
+                            contentDescription = "Next match"
                         )
                     }
                 }
@@ -836,7 +909,7 @@ private fun SearchTopBar(
         },
         navigationIcon = {
             IconButton(onClick = onCloseSearch) {
-                Icon(Icons.Default.Close, contentDescription = "Close search")
+                Icon(Icons.Filled.Close, contentDescription = "Close search")
             }
         },
         colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
@@ -844,6 +917,27 @@ private fun SearchTopBar(
             titleContentColor = MaterialTheme.colorScheme.onSurface
         )
     )
+}
+
+@Composable
+private fun MutedBottomInfoBar() {
+    Surface(
+        tonalElevation = 0.dp,
+        color = MaterialTheme.colorScheme.primaryContainer
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "You’re muted. You can’t send messages.",
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+    }
 }
 
 @Composable
@@ -863,15 +957,12 @@ private fun HighlightedText(
     var lastIndex = 0
 
     matches.forEach { match ->
-        // Add normal text before match
         if (match.range.first > lastIndex) {
             spans.add(TextSpan(text.substring(lastIndex, match.range.first), false))
         }
-        // Add highlighted match
         spans.add(TextSpan(text.substring(match.range.first, match.range.last + 1), true))
         lastIndex = match.range.last + 1
     }
-    // Add remaining text
     if (lastIndex < text.length) {
         spans.add(TextSpan(text.substring(lastIndex), false))
     }
@@ -880,21 +971,14 @@ private fun HighlightedText(
         text = buildAnnotatedString {
             spans.forEach { span ->
                 if (span.isHighlighted) {
-                    // Use basic color properties instead of complex SpanStyle constructor
                     withStyle(
                         style = SpanStyle(
                             background = Color.Yellow,
                             color = Color.Black
                         )
-                    ) {
-                        append(span.text)
-                    }
+                    ) { append(span.text) }
                 } else {
-                    withStyle(
-                        style = SpanStyle(color = textColor)
-                    ) {
-                        append(span.text)
-                    }
+                    withStyle(style = SpanStyle(color = textColor)) { append(span.text) }
                 }
             }
         },

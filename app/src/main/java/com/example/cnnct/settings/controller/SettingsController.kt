@@ -5,7 +5,7 @@ class SettingsController {
         when (option) {
             "Account" -> "account"
             "Privacy" -> "privacy"
-            "Themes" -> "themes"
+            "Archived Chats" -> "archived"
             "Notifications" -> "notifications"
             "Blocked Accounts" -> "blocked"
             else -> ""

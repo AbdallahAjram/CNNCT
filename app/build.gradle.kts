@@ -65,6 +65,7 @@ dependencies {
     implementation("com.squareup.moshi:moshi-kotlin:1.15.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1") // or newer
     implementation("io.coil-kt:coil-compose:2.6.0")
+    implementation("com.vanniktech:android-image-cropper:4.5.0")
     implementation("androidx.media3:media3-exoplayer:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
     implementation("androidx.media3:media3-datasource:1.3.1")

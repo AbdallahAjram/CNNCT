@@ -225,10 +225,10 @@ fun DayDivider(label: String) {
 @Composable
 fun Ticks(sent: Boolean, delivered: Boolean, read: Boolean) {
     val color = when {
-        read -> Color(0xFF34B7F1)
-        delivered -> Color.Gray
-        sent -> Color.Gray
-        else -> Color.Gray.copy(alpha = 0.4f)
+        read -> Color(0xFF34B7F1) // Blue when read
+        delivered -> Color.Gray // when delivered but not read
+        sent -> Color.Gray // Gray when just sent
+        else -> Color.Gray.copy(alpha = 0.4f) // Very light gray when not sent
     }
     val text = when {
         read -> "✓✓"
@@ -236,9 +236,21 @@ fun Ticks(sent: Boolean, delivered: Boolean, read: Boolean) {
         sent -> "✓"
         else -> "•"
     }
-    Text(text, color = color, style = MaterialTheme.typography.labelSmall)
-}
 
+    // Debug text to see what's happening
+    val debugText = when {
+        read -> " (read)"
+        delivered -> " (delivered)"
+        sent -> " (sent)"
+        else -> " (sending)"
+    }
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(text, color = color, style = MaterialTheme.typography.labelSmall)
+        // Uncomment for debugging:
+        // Text(debugText, color = Color.Red, style = MaterialTheme.typography.labelSmall, fontSize = 8.sp)
+    }
+}
 @Composable
 fun MessageInput(
     onSend: (String) -> Unit,

@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Place // ⬅️ NEW
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -12,10 +13,11 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 fun AttachChooserDialog(
-    onPickMedia: () -> Unit,               // will be wired to MULTIPLE media
-    onPickDocument: () -> Unit,            // will be wired to MULTIPLE docs
-    onPickMultipleMedia: () -> Unit,       // keep param for compatibility (not shown)
-    onPickMultipleDocuments: () -> Unit,   // keep param for compatibility (not shown)
+    onPickMedia: () -> Unit,               // MULTIPLE media
+    onPickDocument: () -> Unit,            // MULTIPLE docs
+    onPickMultipleMedia: () -> Unit,       // kept
+    onPickMultipleDocuments: () -> Unit,   // kept
+    onSendLocation: () -> Unit,            // ⬅️ NEW
     onDismiss: () -> Unit
 ) {
     AlertDialog(
@@ -25,39 +27,38 @@ fun AttachChooserDialog(
         title = { Text("Attach") },
         text = {
             Column(Modifier.fillMaxWidth()) {
-                // 👇 Single-looking label, but triggers MULTIPLE media picker
                 ListItem(
                     headlineContent = { Text("Photo or Video (Gallery)") },
-                    leadingContent = {
-                        Icon(
-                            imageVector = Icons.Default.Image,
-                            contentDescription = null
-                        )
-                    },
+                    leadingContent = { Icon(imageVector = Icons.Default.Image, contentDescription = null) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
-                            // Route to MULTIPLE
                             onPickMultipleMedia()
                             onDismiss()
                         }
                 )
                 Divider()
 
-                // 👇 Single-looking label, but triggers MULTIPLE docs picker
                 ListItem(
                     headlineContent = { Text("Document (PDF / Word / Excel)") },
-                    leadingContent = {
-                        Icon(
-                            imageVector = Icons.Default.AttachFile,
-                            contentDescription = null
-                        )
-                    },
+                    leadingContent = { Icon(imageVector = Icons.Default.AttachFile, contentDescription = null) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
-                            // Route to MULTIPLE
                             onPickMultipleDocuments()
+                            onDismiss()
+                        }
+                )
+                Divider()
+
+                // ⬇️ NEW row
+                ListItem(
+                    headlineContent = { Text("Send my location") },
+                    leadingContent = { Icon(imageVector = Icons.Default.Place, contentDescription = null) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            onSendLocation()
                             onDismiss()
                         }
                 )

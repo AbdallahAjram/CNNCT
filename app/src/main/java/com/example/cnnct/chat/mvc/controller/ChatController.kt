@@ -5,9 +5,11 @@ import android.net.Uri
 import com.cnnct.chat.mvc.model.ChatRepository
 import com.cnnct.chat.mvc.model.Message
 import com.cnnct.chat.mvc.model.MessageDraft
+import com.cnnct.chat.mvc.model.MessageType
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.MetadataChanges
+import com.google.firebase.firestore.GeoPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -111,12 +113,34 @@ class ChatController(
         }
     }
 
+    /** ⬇️ FIXED: Location sender with proper MessageType.location */
+    fun sendLocation(chatId: String, senderId: String, lat: Double, lng: Double, address: String?) {
+        if (_iBlockedPeer.value) {
+            _sendError.value = "You blocked this user. Unblock to chat."
+            return
+        }
+        scope.launch {
+            try {
+                val draft = MessageDraft(
+                    type = MessageType.location, // ✅ CORRECT: Use location type
+                    text = address,              // keep optional human-readable address in text
+                    location = GeoPoint(lat, lng)
+                )
+                repo.sendMessage(chatId, senderId, draft)
+            } catch (e: Exception) {
+                _sendError.value = "Location not sent. You may be blocked."
+            }
+        }
+    }
+
     fun markRead(chatId: String, userId: String, lastId: String?) {
         scope.launch {
             try {
+                println("🎯 ChatController.markRead called: chat=$chatId, user=$userId, lastId=$lastId")
                 repo.markRead(chatId, userId, lastId)
+                println("✅ ChatController.markRead completed successfully")
             } catch (e: Exception) {
-                println("⚠️ markRead failed: ${e.message}")
+                println("❌ ChatController.markRead failed: ${e.message}")
             }
         }
     }

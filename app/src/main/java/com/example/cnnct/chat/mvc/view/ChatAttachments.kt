@@ -32,6 +32,9 @@ import coil.compose.SubcomposeAsyncImageContent
 import coil.decode.VideoFrameDecoder
 import coil.request.ImageRequest
 import com.cnnct.chat.mvc.model.Message
+import com.cnnct.chat.mvc.model.MessageType
+import android.content.Intent // ⬅️ NEW
+import android.net.Uri       // ⬅️ NEW
 
 enum class AttachmentKind { Image, Video, Pdf, Docx, Xlsx, Other }
 
@@ -50,14 +53,7 @@ fun detectAttachmentKind(contentType: String?, fileName: String?): AttachmentKin
 }
 
 /**
- * Inline-friendly attachment renderer:
- *  - Images: inline bubble with correct aspect ratio & rounded corners
- *  - Videos: inline bubble with thumbnail (frame extracted via coil-video), play overlay
- *  - Other files: compact row with icon + filename
- *
- * Long-press selection:
- *  - Parent bubble handles long-press via combinedClickable in ChatScreen.
- *  - We disable inner clickable when inSelection=true so long-press works.
+ * Inline-friendly attachment renderer.
  */
 @Composable
 fun AttachmentContent(
@@ -68,6 +64,16 @@ fun AttachmentContent(
     sizeBytes: Long? = null,
     onOpen: () -> Unit = {}
 ) {
+    // ⬇️ NEW: Location first
+    if (message.type == MessageType.location && message.location != null) {
+        LocationMessageBubble(
+            lat = message.location.latitude,
+            lng = message.location.longitude,
+            address = message.text
+        )
+        return
+    }
+
     val kind = detectAttachmentKind(contentType, fileName ?: message.text)
     val label = fileName ?: (message.text ?: "Attachment")
 
@@ -155,7 +161,7 @@ private fun InlineImageBubble(
     }
 }
 
-/* -------------------- Inline Video (thumbnail via custom ImageLoader + VideoFrameDecoder) -------------------- */
+/* -------------------- Inline Video -------------------- */
 
 @Composable
 private fun InlineVideoBubble(
@@ -165,7 +171,6 @@ private fun InlineVideoBubble(
     onOpen: () -> Unit
 ) {
     val context = LocalContext.current
-    // Build an ImageLoader that can decode video frames.
     val imageLoader = remember(context) {
         ImageLoader.Builder(context)
             .components { add(VideoFrameDecoder.Factory()) }
@@ -227,7 +232,6 @@ private fun InlineVideoBubble(
                 .height(targetHeight)
         )
 
-        // Play button overlay
         Box(
             modifier = Modifier
                 .align(Alignment.Center)
@@ -241,7 +245,7 @@ private fun InlineVideoBubble(
     }
 }
 
-/* -------------------- File Row (pdf/doc/xlsx/etc.) -------------------- */
+/* -------------------- File Row -------------------- */
 
 @Composable
 private fun FileRow(
@@ -286,5 +290,56 @@ private fun prettyBytes(bytes: Long): String {
         bytes >= mb -> String.format("%.2f MB", bytes / mb)
         bytes >= kb -> String.format("%.0f KB", bytes / kb)
         else -> "$bytes B"
+    }
+}
+/* -------------------- NEW: Location bubble -------------------- */
+
+@Composable
+private fun LocationMessageBubble(
+    lat: Double,
+    lng: Double,
+    address: String?
+) {
+    val context = LocalContext.current
+    val maxWidth = LocalConfiguration.current.screenWidthDp.dp * 0.78f
+
+    Column(
+        modifier = Modifier
+            .widthIn(max = maxWidth)
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(10.dp)
+    ) {
+        Text("Location", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (!address.isNullOrBlank()) {
+            Spacer(Modifier.height(2.dp))
+            Text(address, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+        }
+        Spacer(Modifier.height(2.dp))
+        Text(String.format("%.5f, %.5f", lat, lng), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.primaryContainer)
+                .clickable {
+                    // Prefer Google Maps app via geo:, fallback to web
+                    val geo = Uri.parse("geo:$lat,$lng?q=$lat,$lng")
+                    val geoIntent = Intent(Intent.ACTION_VIEW, geo).apply {
+                        `package` = "com.google.android.apps.maps"
+                    }
+                    try {
+                        context.startActivity(geoIntent)
+                    } catch (_: Exception) {
+                        val web = Uri.parse("https://www.google.com/maps/search/?api=1&query=$lat,$lng")
+                        context.startActivity(Intent(Intent.ACTION_VIEW, web))
+                    }
+                }
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Open in Maps", color = MaterialTheme.colorScheme.onPrimaryContainer, style = MaterialTheme.typography.bodyMedium)
+        }
     }
 }

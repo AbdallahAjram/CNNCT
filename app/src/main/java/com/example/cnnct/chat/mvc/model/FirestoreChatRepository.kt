@@ -109,11 +109,12 @@ class FirestoreChatRepository(
                 "createdAtClient"   to Timestamp.now()
             ))
 
-            val summaryText = when {
-                draft.type == MessageType.text -> draft.text.orEmpty()
-                (draft.contentType ?: "").startsWith("image/") -> "📷 Photo"
-                (draft.contentType ?: "").startsWith("video/") -> "🎬 Video"
-                draft.type.name.equals("location", ignoreCase = true) -> "📍 Location"
+            // ✅ FIXED: Proper summary text for location messages
+            val summaryText = when (draft.type) {
+                MessageType.text -> draft.text.orEmpty()
+                MessageType.location -> "📍 Location"
+                MessageType.image -> "📷 Photo"
+                MessageType.video -> "🎬 Video"
                 else -> "📎 ${draft.fileName ?: "Attachment"}"
             }
 
@@ -230,13 +231,14 @@ class FirestoreChatRepository(
 
     override suspend fun updateUserPreview(ownerUserId: String, chatId: String, latest: Message?) {
         val ts = latest?.createdAt ?: latest?.createdAtClient
+        // ✅ FIXED: Proper preview text for location messages
         val previewText: String? = when {
             latest == null -> null
             latest.type == MessageType.text -> latest.text?.take(500)
             latest.type == MessageType.image -> "Photo"
             latest.type == MessageType.video -> "Video"
             latest.type == MessageType.file -> latest.text ?: "File"
-            latest.type.name.equals("location", ignoreCase = true) -> "Location"
+            latest.type == MessageType.location -> "Location" // ✅ ADDED
             else -> latest.text ?: latest.type.name.lowercase().replaceFirstChar { it.uppercase() }
         }
 
@@ -261,7 +263,7 @@ class FirestoreChatRepository(
         localUri: Uri,
         contentResolver: ContentResolver
     ) {
-        // We’ll reuse iBlockedPeer() check inside sendMessage (called at the end)
+        // We'll reuse iBlockedPeer() check inside sendMessage (called at the end)
         val info = resolveUriInfo(contentResolver, localUri)
         val folder = when {
             info.contentType.startsWith("image/") -> "images"

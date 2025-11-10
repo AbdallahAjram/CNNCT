@@ -1,3 +1,4 @@
+
 package com.cnnct.chat.mvc.view
 
 import android.content.Intent
@@ -64,6 +65,16 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.time.Duration.Companion.minutes
 
+// ⬇️ NEW imports for location/permissions
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.annotation.RequiresPermission
+import androidx.core.content.ContextCompat
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
+// ⬆️ NEW
+
 @RequiresApi(Build.VERSION_CODES.O)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -111,6 +122,115 @@ fun ChatScreen(
     val ctx = LocalContext.current
     val messagesRaw by controller.messages.collectAsState()
     val memberMetaLive by controller.memberMeta.collectAsState()
+
+    // ⬇️ NEW: Fused client + permission flow
+    val fused = remember(ctx) { LocationServices.getFusedLocationProviderClient(ctx) }
+    var sendingLocation by remember { mutableStateOf(false) }
+
+    // Define request function before launcher to avoid unresolved reference
+    // Permission-safe request
+    fun requestAndSendLocation() {
+        val fineGranted = ContextCompat.checkSelfPermission(
+            ctx, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val coarseGranted = ContextCompat.checkSelfPermission(
+            ctx, Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (!fineGranted && !coarseGranted) {
+            Toast.makeText(ctx, "Location permission not granted", Toast.LENGTH_SHORT).show()
+            sendingLocation = false
+            return
+        }
+
+        sendingLocation = true
+        val cts = CancellationTokenSource()
+        val priority = if (fineGranted) {
+            Priority.PRIORITY_HIGH_ACCURACY
+        } else {
+            Priority.PRIORITY_BALANCED_POWER_ACCURACY
+        }
+
+        try {
+            fused.getCurrentLocation(priority, cts.token)
+                .addOnSuccessListener { loc ->
+                    if (loc != null) {
+                        controller.sendLocation(chatId, currentUserId, loc.latitude, loc.longitude, address = null)
+                        Toast.makeText(ctx, "Location sent", Toast.LENGTH_SHORT).show()
+                        sendingLocation = false
+                    } else {
+                        try {
+                            fused.lastLocation
+                                .addOnSuccessListener { last ->
+                                    if (last != null) {
+                                        controller.sendLocation(chatId, currentUserId, last.latitude, last.longitude, address = null)
+                                        Toast.makeText(ctx, "Location sent", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(ctx, "Location unavailable", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                                .addOnFailureListener {
+                                    Toast.makeText(ctx, "Failed to get location", Toast.LENGTH_SHORT).show()
+                                    sendingLocation = false
+                                }
+                        } catch (se: SecurityException) {
+                            Toast.makeText(ctx, "Location permission required", Toast.LENGTH_SHORT).show()
+                            sendingLocation = false
+                        }
+                    }
+                }
+                .addOnFailureListener {
+                    Toast.makeText(ctx, "Failed to get location", Toast.LENGTH_SHORT).show()
+                    sendingLocation = false
+                }
+        } catch (se: SecurityException) {
+            Toast.makeText(ctx, "Location permission required", Toast.LENGTH_SHORT).show()
+            sendingLocation = false
+        } catch (_: Throwable) {
+            Toast.makeText(ctx, "Failed to get location", Toast.LENGTH_SHORT).show()
+            sendingLocation = false
+        }
+    }
+
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        val granted = (result[Manifest.permission.ACCESS_FINE_LOCATION] == true) ||
+                (result[Manifest.permission.ACCESS_COARSE_LOCATION] == true)
+        if (!granted) {
+            Toast.makeText(ctx, "Location permission denied", Toast.LENGTH_SHORT).show()
+            sendingLocation = false
+            return@rememberLauncherForActivityResult
+        }
+        requestAndSendLocation()
+    }
+
+    fun startSendLocationFlow() {
+        if (mutedByAdmin && chatType == "group") {
+            Toast.makeText(ctx, "You’re muted by an admin", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (iBlockedPeer) {
+            Toast.makeText(ctx, "You blocked this user", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (blockedByOther) {
+            Toast.makeText(ctx, "This user blocked you", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val fine = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (!fine && !coarse) {
+            permissionLauncher.launch(arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ))
+        } else {
+            requestAndSendLocation()
+        }
+    }
+   
 
     val idToTime by remember(messagesRaw) {
         mutableStateOf(
@@ -221,8 +341,6 @@ fun ChatScreen(
     fun metaOf(uid: String): Map<*, *>? =
         (memberMetaLive as? Map<*, *>)?.get(uid) as? Map<*, *>
 
-    fun openedAtMs(uid: String): Long? =
-        (metaOf(uid)?.get("lastOpenedAt") as? Timestamp)?.toDate()?.time
     fun msgTimeMsById(id: String?): Long? = if (id.isNullOrBlank()) null else idToTime[id]
 
     fun presenceFor(uid: String?): Presence {
@@ -249,15 +367,13 @@ fun ChatScreen(
         }
     }
 
-    val isAtBottom by remember {
-        derivedStateOf {
-            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index
-            lastVisible != null && messages.isNotEmpty() && lastVisible >= messages.lastIndex
-        }
-    }
-    LaunchedEffect(isAtBottom, messages.lastOrNull()?.id, inSelection, isSearchActive) {
-        if (isAtBottom && !inSelection && !isSearchActive) {
-            messages.lastOrNull()?.let { last -> controller.markRead(chatId, currentUserId, last.id) }
+    LaunchedEffect(messages.lastOrNull()?.id, inSelection, isSearchActive) {
+        if (!inSelection && !isSearchActive && messages.isNotEmpty()) {
+            val lastMessage = messages.lastOrNull()
+            if (lastMessage != null) {
+                println("🎯 Auto-markRead triggered: chat=$chatId, lastMessage=${lastMessage.id}")
+                controller.markRead(chatId, currentUserId, lastMessage.id)
+            }
         }
     }
 
@@ -358,7 +474,6 @@ fun ChatScreen(
                     if (onLeaveGroup != null) showLeaveDialog = true
                     else Toast.makeText(ctx, "Leave group (placeholder)", Toast.LENGTH_SHORT).show()
                 }
-
 
                 if (triggerFocus) {
                     LaunchedEffect(Unit) {
@@ -635,35 +750,59 @@ fun ChatScreen(
                                                             Spacer(Modifier.width(6.dp))
                                                             val createdMs = m.sentAtMs()
 
+                                                            // ✅ SIMPLIFIED TICK LOGIC
                                                             val delivered: Boolean
                                                             val read: Boolean
 
                                                             if (chatType == "private") {
+                                                                // For private chats
                                                                 val otherMeta = metaOf(otherUserId ?: "")
                                                                 val readId = otherMeta?.get("lastReadMessageId") as? String
                                                                 val readCutoff = msgTimeMsById(readId)
+
+                                                                // Read: other user has specifically read this message
+                                                                read = createdMs != 0L && readCutoff != null && readCutoff >= createdMs
+
+                                                                // Delivered: other user has opened chat OR read the message
                                                                 val openedAt = (otherMeta?.get("lastOpenedAt") as? Timestamp)?.toDate()?.time
                                                                 val openedOk = createdMs != 0L && openedAt != null && openedAt >= createdMs
-                                                                val readOk = createdMs != 0L && readCutoff != null && readCutoff >= createdMs
-                                                                delivered = openedOk || readOk
-                                                                read = readOk
+                                                                delivered = openedOk || read
+
+                                                                // Debug logging
+                                                                println("🔵 Private Chat - Message: ${m.id}")
+                                                                println("   Created: $createdMs, ReadId: $readId, ReadCutoff: $readCutoff")
+                                                                println("   Delivered: $delivered, Read: $read")
+
                                                             } else if (chatType == "group") {
+                                                                // For group chats
                                                                 val others = memberIds.filter { it != currentUserId }
-                                                                val readAll = createdMs != 0L && others.all { uid ->
-                                                                    val rid = (metaOf(uid)?.get("lastReadMessageId") as? String)
-                                                                    val cutoff = msgTimeMsById(rid)
-                                                                    cutoff != null && cutoff >= createdMs
+                                                                if (others.isEmpty()) {
+                                                                    delivered = false
+                                                                    read = false
+                                                                } else {
+                                                                    // Read: ALL other members have read this message
+                                                                    read = createdMs != 0L && others.all { uid ->
+                                                                        val rid = (metaOf(uid)?.get("lastReadMessageId") as? String)
+                                                                        val cutoff = msgTimeMsById(rid)
+                                                                        cutoff != null && cutoff >= createdMs
+                                                                    }
+
+                                                                    // Delivered: ALL other members have opened OR at least one has read
+                                                                    val allOpened = createdMs != 0L && others.all { uid ->
+                                                                        val openedAt = (metaOf(uid)?.get("lastOpenedAt") as? Timestamp)?.toDate()?.time
+                                                                        openedAt != null && openedAt >= createdMs
+                                                                    }
+                                                                    delivered = allOpened || read
+
+                                                                    // Debug logging
+                                                                    println("🔵 Group Chat - Message: ${m.id}")
+                                                                    println("   Members: ${others.size}, Delivered: $delivered, Read: $read")
                                                                 }
-                                                                val openedAll = createdMs != 0L && others.all { uid ->
-                                                                    val o = (metaOf(uid)?.get("lastOpenedAt") as? Timestamp)?.toDate()?.time
-                                                                    o != null && o >= createdMs
-                                                                }
-                                                                delivered = openedAll || readAll
-                                                                read = readAll
                                                             } else {
                                                                 delivered = false
                                                                 read = false
                                                             }
+
                                                             Ticks(sent = createdMs != 0L, delivered = delivered, read = read)
                                                         }
                                                     }
@@ -749,6 +888,7 @@ fun ChatScreen(
                             )
                         },
                         onPickMultipleDocuments = { pickDocuments.launch(docTypes) },
+                        onSendLocation = { startSendLocationFlow() }, // ⬅️ NEW
                         onDismiss = { showAttachDialog = false }
                     )
                 }

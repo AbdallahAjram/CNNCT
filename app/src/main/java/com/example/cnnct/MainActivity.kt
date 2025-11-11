@@ -11,6 +11,7 @@ import com.example.cnnct.homepage.controller.PreloadedChatsCache
 import com.example.cnnct.homepage.view.HomeActivity
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
+import android.util.Log
 
 class MainActivity : AppCompatActivity() {
 //splash screen
@@ -27,6 +28,7 @@ class MainActivity : AppCompatActivity() {
                 PreloadedChatsCache.chatSummaries = chats
             }
         }
+
 
         Handler(Looper.getMainLooper()).postDelayed({
             val currentUser = FirebaseAuth.getInstance().currentUser

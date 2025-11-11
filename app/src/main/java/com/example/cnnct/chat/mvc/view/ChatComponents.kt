@@ -26,6 +26,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.runtime.MutableState
 import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.runtime.getValue
@@ -45,7 +47,8 @@ fun SelectionTopBar(
     canEdit: Boolean,
     onClose: () -> Unit,
     onEdit: () -> Unit,
-    onDeleteClick: () -> Unit
+    onDeleteClick: () -> Unit,
+    onAiSuggest: (() -> Unit)? = null // ✅ NEW PARAM
 ) {
     TopAppBar(
         navigationIcon = {
@@ -55,6 +58,11 @@ fun SelectionTopBar(
         },
         title = { Text("$count selected") },
         actions = {
+            if (onAiSuggest != null) {
+                IconButton(onClick = onAiSuggest) {
+                    Icon(Icons.Filled.SmartToy, contentDescription = "AI Suggest") // ✅ New AI button
+                }
+            }
             IconButton(onClick = onEdit, enabled = canEdit) {
                 Icon(Icons.Filled.Edit, contentDescription = "Edit")
             }
@@ -65,6 +73,7 @@ fun SelectionTopBar(
     )
 }
 
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TopBar(
@@ -74,16 +83,14 @@ fun TopBar(
     photoUrl: String?,
     onBack: () -> Unit,
     onCallClick: () -> Unit,
-    onHeaderClick: () -> Unit, // <-- FIX: regular lambda (not @Composable)
+    onHeaderClick: () -> Unit,
 
-    // decide which actions to show
     chatType: String = "private",
 
-    // menu callbacks
     onSearch: (() -> Unit)? = null,
     onClearChat: (() -> Unit)? = null,
-    onBlockPeer: (() -> Unit)? = null,   // only for private
-    onLeaveGroup: (() -> Unit)? = null   // only for group
+    onBlockPeer: (() -> Unit)? = null,
+    onLeaveGroup: (() -> Unit)? = null
 ) {
     var menuOpen by remember { mutableStateOf(false) }
 
@@ -97,7 +104,7 @@ fun TopBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onHeaderClick() }, // now safe
+                    .clickable { onHeaderClick() },
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 AvatarWithStatus(size = 42.dp, presence = presence, photoUrl = photoUrl)
@@ -122,16 +129,15 @@ fun TopBar(
             }
         },
         actions = {
-            // Show call icon only on private chats
             if (chatType == "private") {
                 IconButton(onClick = onCallClick) {
                     Icon(Icons.Rounded.Call, contentDescription = "Call")
                 }
             }
-            // 3-dots menu
             IconButton(onClick = { menuOpen = true }) {
                 Icon(Icons.Rounded.MoreVert, contentDescription = "More")
             }
+
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                 if (onSearch != null) {
                     DropdownMenuItem(text = { Text("Search") }, onClick = {
@@ -253,10 +259,11 @@ fun Ticks(sent: Boolean, delivered: Boolean, read: Boolean) {
 }
 @Composable
 fun MessageInput(
+    textState: MutableState<String>,
     onSend: (String) -> Unit,
     onAttach: (() -> Unit)? = null
 ) {
-    val text = remember { mutableStateOf("") }
+    val text = textState
     val canSend = text.value.isNotBlank()
     val keyboard = LocalSoftwareKeyboardController.current
 

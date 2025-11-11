@@ -1,4 +1,3 @@
-
 package com.cnnct.chat.mvc.view
 
 import android.content.Intent
@@ -10,6 +9,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
+import androidx.compose.ui.text.input.ImeAction
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
@@ -26,6 +27,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -51,7 +53,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.cnnct.chat.mvc.controller.ChatController
@@ -73,6 +74,13 @@ import androidx.core.content.ContextCompat
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
+// ⬆️ NEW
+
+// ⬇️ NEW AI imports
+
+import com.example.cnnct.chat.mvc.ai.AiSuggestionsDialog
+import com.example.cnnct.chat.mvc.ai.AiSuggesterController
+
 // ⬆️ NEW
 
 @RequiresApi(Build.VERSION_CODES.O)
@@ -122,6 +130,11 @@ fun ChatScreen(
     val ctx = LocalContext.current
     val messagesRaw by controller.messages.collectAsState()
     val memberMetaLive by controller.memberMeta.collectAsState()
+
+    // ⬇️ NEW: AI Controller and state
+    val aiController = remember { AiSuggesterController() }
+    var showAiSheet by remember { mutableStateOf(false) }
+    val inputTextState = remember { mutableStateOf("") }
 
     // ⬇️ NEW: Fused client + permission flow
     val fused = remember(ctx) { LocationServices.getFusedLocationProviderClient(ctx) }
@@ -208,7 +221,7 @@ fun ChatScreen(
 
     fun startSendLocationFlow() {
         if (mutedByAdmin && chatType == "group") {
-            Toast.makeText(ctx, "You’re muted by an admin", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, "You're muted by an admin", Toast.LENGTH_SHORT).show()
             return
         }
         if (iBlockedPeer) {
@@ -230,7 +243,7 @@ fun ChatScreen(
             requestAndSendLocation()
         }
     }
-   
+
 
     val idToTime by remember(messagesRaw) {
         mutableStateOf(
@@ -400,6 +413,13 @@ fun ChatScreen(
         derivedStateOf { selected.isNotEmpty() && eligibility.okIds.size == selected.size }
     }
 
+    // ⬇️ NEW: Get selected messages text for AI suggestions
+    val selectedMessages = remember(selected, messages) {
+        messages.filter { it.id in selected }.mapNotNull { msg ->
+            if (!msg.deleted && msg.type == MessageType.text) msg.text else null
+        }
+    }
+
     // ---------- local header tap debounce ----------
     var lastHeaderTapAt by remember { mutableLongStateOf(0L) }
     fun safeOpenHeader() {
@@ -453,7 +473,24 @@ fun ChatScreen(
                         editTargetId = m.id
                         editText = m.text.orElse("")
                     },
-                    onDeleteClick = { showDeleteDialog = true }
+                    onDeleteClick = { showDeleteDialog = true },
+                    // ⬇️ NEW: AI Suggest button in selection mode
+                    onAiSuggest = {
+                        // build fresh list each time
+                        val chosenTexts = messages.filter { it.id in selected }
+                            .mapNotNull { msg ->
+                                if (!msg.deleted && msg.type == MessageType.text) msg.text else null
+                            }
+
+                        println("🧠 Selected messages count=${chosenTexts.size}, ids=${selected.joinToString()}")
+                        chosenTexts.forEachIndexed { i, text ->
+                            println("🧠 Message[$i]: $text")
+                        }
+
+                        aiController.fetchSuggestions(chosenTexts)
+                        showAiSheet = true
+                    }
+
                 )
             } else {
                 var triggerFocus by remember { mutableStateOf(false) }
@@ -504,9 +541,10 @@ fun ChatScreen(
                 MutedBottomInfoBar()
             } else if (!inSelection && editTargetId == null && !isSearchActive) {
                 MessageInput(
+                    textState = inputTextState,
                     onSend = { text ->
                         if (mutedByAdmin && chatType == "group") {
-                            Toast.makeText(ctx, "You’re muted by an admin", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(ctx, "You're muted by an admin", Toast.LENGTH_SHORT).show()
                             return@MessageInput
                         }
                         when {
@@ -520,10 +558,11 @@ fun ChatScreen(
                             }
                         }
                         controller.sendText(chatId, currentUserId, text)
+                        // inputTextState is cleared inside MessageInput after sending
                     },
                     onAttach = {
                         if (mutedByAdmin && chatType == "group") {
-                            Toast.makeText(ctx, "You’re muted by an admin", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(ctx, "You're muted by an admin", Toast.LENGTH_SHORT).show()
                             return@MessageInput
                         }
                         when {
@@ -570,7 +609,7 @@ fun ChatScreen(
                 if (mutedByAdmin && chatType == "group") {
                     // Muted info banner in blue (group only)
                     BlockBanner(
-                        text = "🔇 You’re muted by an admin. You can’t send messages.",
+                        text = "🔇 You're muted by an admin. You can't send messages.",
                         bg = MaterialTheme.colorScheme.primaryContainer,
                         fg = MaterialTheme.colorScheme.onPrimaryContainer
                     )
@@ -748,55 +787,51 @@ fun ChatScreen(
                                                         )
                                                         if (me && !m.deleted) {
                                                             Spacer(Modifier.width(6.dp))
+
                                                             val createdMs = m.sentAtMs()
 
-                                                            // ✅ SIMPLIFIED TICK LOGIC
                                                             val delivered: Boolean
                                                             val read: Boolean
 
                                                             if (chatType == "private") {
-                                                                // For private chats
-                                                                val otherMeta = metaOf(otherUserId ?: "")
-                                                                val readId = otherMeta?.get("lastReadMessageId") as? String
-                                                                val readCutoff = msgTimeMsById(readId)
+                                                                // Prefer fast props from the Activity, fallback to memberMeta map.
+                                                                val readIdFromProps = otherLastReadId
+                                                                val openedAtFromProps = otherLastOpenedAtMs
 
-                                                                // Read: other user has specifically read this message
+                                                                val readIdFromMeta = (metaOf(otherUserId ?: "")?.get("lastReadMessageId") as? String)
+                                                                val openedAtFromMeta = (metaOf(otherUserId ?: "")?.get("lastOpenedAt") as? Timestamp)?.toDate()?.time
+
+                                                                val effectiveReadId = readIdFromProps ?: readIdFromMeta
+                                                                val effectiveOpenedAt = openedAtFromProps ?: openedAtFromMeta
+
+                                                                val readCutoff = msgTimeMsById(effectiveReadId)
+
                                                                 read = createdMs != 0L && readCutoff != null && readCutoff >= createdMs
-
-                                                                // Delivered: other user has opened chat OR read the message
-                                                                val openedAt = (otherMeta?.get("lastOpenedAt") as? Timestamp)?.toDate()?.time
-                                                                val openedOk = createdMs != 0L && openedAt != null && openedAt >= createdMs
+                                                                val openedOk = createdMs != 0L && effectiveOpenedAt != null && effectiveOpenedAt >= createdMs
                                                                 delivered = openedOk || read
 
-                                                                // Debug logging
-                                                                println("🔵 Private Chat - Message: ${m.id}")
-                                                                println("   Created: $createdMs, ReadId: $readId, ReadCutoff: $readCutoff")
-                                                                println("   Delivered: $delivered, Read: $read")
-
                                                             } else if (chatType == "group") {
-                                                                // For group chats
+                                                                // STRICT group behavior (as you want):
+                                                                // delivered = ALL members opened OR ALL members read
+                                                                // read      = ALL members read
                                                                 val others = memberIds.filter { it != currentUserId }
-                                                                if (others.isEmpty()) {
+
+                                                                if (others.isEmpty() || createdMs == 0L) {
                                                                     delivered = false
                                                                     read = false
                                                                 } else {
-                                                                    // Read: ALL other members have read this message
-                                                                    read = createdMs != 0L && others.all { uid ->
+                                                                    val allRead = others.all { uid ->
                                                                         val rid = (metaOf(uid)?.get("lastReadMessageId") as? String)
                                                                         val cutoff = msgTimeMsById(rid)
                                                                         cutoff != null && cutoff >= createdMs
                                                                     }
-
-                                                                    // Delivered: ALL other members have opened OR at least one has read
-                                                                    val allOpened = createdMs != 0L && others.all { uid ->
-                                                                        val openedAt = (metaOf(uid)?.get("lastOpenedAt") as? Timestamp)?.toDate()?.time
-                                                                        openedAt != null && openedAt >= createdMs
+                                                                    val allOpened = others.all { uid ->
+                                                                        val o = (metaOf(uid)?.get("lastOpenedAt") as? Timestamp)?.toDate()?.time
+                                                                        o != null && o >= createdMs
                                                                     }
-                                                                    delivered = allOpened || read
 
-                                                                    // Debug logging
-                                                                    println("🔵 Group Chat - Message: ${m.id}")
-                                                                    println("   Members: ${others.size}, Delivered: $delivered, Read: $read")
+                                                                    read = allRead
+                                                                    delivered = allOpened || allRead
                                                                 }
                                                             } else {
                                                                 delivered = false
@@ -900,6 +935,23 @@ fun ChatScreen(
                         onDismiss = { viewer = null }
                     )
                 }
+
+                // ⬇️ NEW: AI Suggestions Dialog
+                AiSuggestionsDialog(
+                    isVisible = showAiSheet,
+                    suggestions = aiController.suggestions.value,
+                    isLoading = aiController.isLoading.value,
+                    error = aiController.error.value,
+                    onDismiss = {
+                        showAiSheet = false
+                        aiController.clear()
+                    },
+                    onSuggestionClick = { reply ->
+                        inputTextState.value = reply         // auto-fill the text field
+                        showAiSheet = false                  // close the sheet
+                        clearSelection()                     // exit selection mode
+                    }
+                )
 
                 // ========================
                 // Confirm dialogs
@@ -1072,7 +1124,7 @@ private fun MutedBottomInfoBar() {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                "You’re muted. You can’t send messages.",
+                "You're muted. You can't send messages.",
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                 style = MaterialTheme.typography.bodyMedium
             )

@@ -17,8 +17,12 @@ class HomeActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         callsController = CallsController(this)
         callsController.startIncomingWatcher()
-
+        FirebaseAuth.getInstance().currentUser?.getIdToken(true)
+            ?.addOnSuccessListener { token ->
+                Log.d("TOKEN", token.token ?: "")
+            }
         setContent {
+
             HomeScreen(
                 callsController = callsController,
                 onLogout = {

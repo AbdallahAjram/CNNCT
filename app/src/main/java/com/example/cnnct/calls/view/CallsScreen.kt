@@ -1,16 +1,16 @@
-// app/src/main/java/com/example/cnnct/calls/view/CallsScreen.kt
 package com.example.cnnct.calls.view
 
+import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.example.cnnct.calls.controller.CallsController
 import com.example.cnnct.calls.model.UserCallLog
@@ -22,13 +22,19 @@ import com.google.firebase.firestore.Query
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CallsScreen(controller: CallsController, modifier: Modifier = Modifier) {
+fun CallsScreen(
+    controller: CallsController,
+    modifier: Modifier = Modifier,
+    onBack: (() -> Unit)? = null
+) {
     val uid = FirebaseAuth.getInstance().currentUser?.uid ?: ""
     val uiLogs = remember { mutableStateListOf<UserCallLog>() }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
-    // ---- lightweight in-memory user cache for UI ----
+    // ---- lightweight in-memory user cache ----
     data class UserLite(
         val uid: String,
         val displayName: String?,
@@ -59,7 +65,6 @@ fun CallsScreen(controller: CallsController, modifier: Modifier = Modifier) {
             else -> "Unknown"
         }
 
-    // ---- map /calls doc → UserCallLog (UI only) ----
     fun mapCallDocToLog(doc: DocumentSnapshot, me: String): UserCallLog? {
         if (!doc.exists()) return null
         val callerId = doc.getString("callerId") ?: return null
@@ -79,12 +84,11 @@ fun CallsScreen(controller: CallsController, modifier: Modifier = Modifier) {
             else -> null
         }
 
-        // Normalize status for row UI
         val uiStatus = when {
             status == "missed" -> "missed"
             status == "rejected" -> "rejected"
             startedAt != null && (status == "ended" || status == "in-progress" || status == "accepted") -> "answered"
-            else -> status // fallback
+            else -> status
         }
 
         return UserCallLog(
@@ -98,7 +102,7 @@ fun CallsScreen(controller: CallsController, modifier: Modifier = Modifier) {
         )
     }
 
-    // ---- realtime: merge two listeners (/calls where callerId==me and where calleeId==me) ----
+    // ---- realtime listener for call logs ----
     DisposableEffect(uid) {
         var regCaller: ListenerRegistration? = null
         var regCallee: ListenerRegistration? = null
@@ -153,76 +157,95 @@ fun CallsScreen(controller: CallsController, modifier: Modifier = Modifier) {
         }
     }
 
-    Box(modifier = modifier.fillMaxSize().padding(16.dp)) {
-        if (uiLogs.isEmpty()) {
-            Column(
-                Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Icon(Icons.Filled.Call, contentDescription = null, modifier = Modifier.size(64.dp))
-                Spacer(Modifier.height(8.dp))
-                Text("No calls yet", style = MaterialTheme.typography.bodyLarge)
-            }
-        } else {
-            LazyColumn {
-                items(uiLogs.size, key = { uiLogs[it].callId }) { i ->
-                    val log = uiLogs[i]
-                    val peer = userCache[log.peerId]
-                    CallRow(
-                        log = log,
-                        onClick = {
-                            scope.launch {
-                                controller.startCall(
-                                    log.peerId,
-                                    onCreated = { },
-                                    onError = { }
-                                )
-                            }
-                        },
-                        peerName = displayName(peer),
-                        peerPhotoUrl = peer?.photoUrl
-                    )
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("Call Logs") },
+                navigationIcon = {
+                    IconButton(onClick = {
+                        if (onBack != null) onBack()
+                        else (context as? ComponentActivity)?.finish()
+                    }) {
+                        Icon(
+                            imageVector = Icons.Default.ArrowBack,
+                            contentDescription = "Back"
+                        )
+                    }
                 }
-            }
+            )
         }
-
-        val incoming by controller.incomingCall.collectAsState()
-        incoming?.let { call ->
-            val myUid = uid
-            val peerId = if (call.callerId == myUid) call.calleeId else call.callerId
-
-            val cached = userCache[peerId]
-            LaunchedEffect(peerId) {
-                if (cached == null) fetchUserLite(peerId)?.let { userCache[peerId] = it }
-            }
-            val peer = userCache[peerId]
-            val name = displayName(peer)
-            val phone = peer?.phoneNumber
-            val photo = peer?.photoUrl
-
-            when {
-                call.status == "ringing" && call.calleeId == myUid -> {
-                    IncomingCallScreen(
-                        callerId = call.callerId,
-                        callerName = name,
-                        callerPhotoUrl = photo,
-                        onAccept = { controller.acceptCall(call.callId) },
-                        onReject  = { controller.rejectCall(call.callId) }
-                    )
+    ) { padding ->
+        Box(modifier = modifier.fillMaxSize().padding(padding).padding(16.dp)) {
+            if (uiLogs.isEmpty()) {
+                Column(
+                    Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(Icons.Filled.Call, contentDescription = null, modifier = Modifier.size(64.dp))
+                    Spacer(Modifier.height(8.dp))
+                    Text("No calls yet", style = MaterialTheme.typography.bodyLarge)
                 }
-                call.status == "in-progress" || call.status == "accepted" -> {
-                    InCallScreen(
-                        callerName = name,
-                        callerPhone = phone,
-                        callerPhotoUrl = photo,
-                        initialElapsedSeconds = 0L,
-                        callStatus = call.status,
-                        onEnd = { controller.endCall(call.callId) },
-                        onToggleMute = { muted ->
-                            com.example.cnnct.agora.AgoraManager.muteLocalAudio(muted)
-                        }
-                    )
+            } else {
+                LazyColumn {
+                    items(uiLogs.size, key = { uiLogs[it].callId }) { i ->
+                        val log = uiLogs[i]
+                        val peer = userCache[log.peerId]
+                        CallRow(
+                            log = log,
+                            onClick = {
+                                scope.launch {
+                                    controller.startCall(
+                                        log.peerId,
+                                        onCreated = { },
+                                        onError = { }
+                                    )
+                                }
+                            },
+                            peerName = displayName(peer),
+                            peerPhotoUrl = peer?.photoUrl
+                        )
+                    }
+                }
+            }
+
+            val incoming by controller.incomingCall.collectAsState()
+            incoming?.let { call ->
+                val myUid = uid
+                val peerId = if (call.callerId == myUid) call.calleeId else call.callerId
+
+                val cached = userCache[peerId]
+                LaunchedEffect(peerId) {
+                    if (cached == null) fetchUserLite(peerId)?.let { userCache[peerId] = it }
+                }
+                val peer = userCache[peerId]
+                val name = displayName(peer)
+                val phone = peer?.phoneNumber
+                val photo = peer?.photoUrl
+
+                when {
+                    call.status == "ringing" && call.calleeId == myUid -> {
+                        IncomingCallScreen(
+                            callerId = call.callerId,
+                            callerName = name,
+                            callerPhotoUrl = photo,
+                            onAccept = { controller.acceptCall(call.callId) },
+                            onReject = { controller.rejectCall(call.callId) }
+                        )
+                    }
+                    call.status == "in-progress" || call.status == "accepted" -> {
+                        InCallScreen(
+                            callerName = name,
+                            callerPhone = phone,
+                            callerPhotoUrl = photo,
+                            initialElapsedSeconds = 0L,
+                            callStatus = call.status,
+                            onEnd = { controller.endCall(call.callId) },
+                            onToggleMute = { muted ->
+                                com.example.cnnct.agora.AgoraManager.muteLocalAudio(muted)
+                            }
+                        )
+                    }
                 }
             }
         }

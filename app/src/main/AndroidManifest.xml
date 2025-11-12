@@ -4,20 +4,16 @@
 
     <!-- You don't need WRITE_EXTERNAL_STORAGE for the Photo Picker, but keeping your original line.
          Note: maxSdkVersion=28 means it won't be requested on newer devices anyway. -->
-    <uses-permission
-        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-permission android:name="android.permission/FOREGROUND_SERVICE" tools:ignore="ScopedStorage" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
-    <uses-permission
-        android:name="android.permission.BLUETOOTH_CONNECT"
-        android:required="false" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" android:required="false" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>

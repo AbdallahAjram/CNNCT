@@ -37,17 +37,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
-import com.example.cnnct.R
-import com.example.cnnct.settings.controller.AccountController
-import com.example.cnnct.settings.controller.AccountPhotoController
-import com.example.cnnct.settings.model.UserProfile
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import com.canhub.cropper.CropImageContract
 import com.canhub.cropper.CropImageContractOptions
 import com.canhub.cropper.CropImageOptions
 import com.canhub.cropper.CropImageView
+import com.example.cnnct.R
+import com.example.cnnct.settings.controller.AccountController
+import com.example.cnnct.settings.controller.AccountPhotoController
+import com.example.cnnct.settings.model.UserProfile
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // Palette
 private val Lavender = Color(0xFFF1EAF5)
@@ -70,21 +70,19 @@ fun AccountScreenContent(
     val nameFocusRequester = remember { FocusRequester() }
     val aboutFocusRequester = remember { FocusRequester() }
 
+    // 🔥 Observe live profile from flow
+    val profileState by controller.profileFlow.collectAsState(initial = null)
     var profile by remember { mutableStateOf<UserProfile?>(null) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
 
+    // local editable copies
     var nameEditing by remember { mutableStateOf(false) }
     var aboutEditing by remember { mutableStateOf(false) }
-
     var nameText by remember { mutableStateOf("") }
     var aboutText by remember { mutableStateOf("") }
-
     var nameOriginal by remember { mutableStateOf("") }
     var aboutOriginal by remember { mutableStateOf("") }
 
-    /* -------------------- Cropper -------------------- */
-
+    // -------------------- Cropper --------------------
     val cropLauncher = rememberLauncherForActivityResult(CropImageContract()) { result ->
         scope.launch {
             if (result.isSuccessful) {
@@ -95,8 +93,7 @@ fun AccountScreenContent(
                     withContext(Dispatchers.IO) {
                         AccountPhotoController.uploadAndSaveAvatar(croppedUri)
                     }
-                    // Refresh local profile (and UI)
-                    profile = controller.getProfile()
+                    controller.refreshProfile()
                     snackbarHostState.currentSnackbarData?.dismiss()
                     snackbarHostState.showSnackbar("Profile photo updated")
                 } catch (e: Exception) {
@@ -115,7 +112,7 @@ fun AccountScreenContent(
     ) { pickedUri: Uri? ->
         pickedUri ?: return@rememberLauncherForActivityResult
         val options = CropImageOptions(
-            cropShape = CropImageView.CropShape.OVAL, // circular mask
+            cropShape = CropImageView.CropShape.OVAL,
             aspectRatioX = 1,
             aspectRatioY = 1,
             fixAspectRatio = true,
@@ -128,25 +125,24 @@ fun AccountScreenContent(
             cropMenuCropButtonTitle = "Done"
         )
         cropLauncher.launch(
-            CropImageContractOptions(
-                uri = pickedUri,
-                cropImageOptions = options
-            )
+            CropImageContractOptions(uri = pickedUri, cropImageOptions = options)
         )
     }
 
-    /* -------------------- Load profile once -------------------- */
+    // -------------------- Load once --------------------
     LaunchedEffect(Unit) {
-        runCatching { controller.getProfile() }
-            .onSuccess {
-                profile = it
-                nameText = it.displayName
-                aboutText = it.about.orEmpty()
-                nameOriginal = nameText
-                aboutOriginal = aboutText
-            }
-            .onFailure { error = it.message }
-        loading = false
+        controller.refreshProfile()
+    }
+
+    // When profileFlow emits new data, update UI fields
+    LaunchedEffect(profileState) {
+        profileState?.let {
+            profile = it
+            nameText = it.displayName
+            aboutText = it.about.orEmpty()
+            nameOriginal = it.displayName
+            aboutOriginal = it.about.orEmpty()
+        }
     }
 
     Column(
@@ -158,17 +154,12 @@ fun AccountScreenContent(
             .pointerInput(Unit) { detectTapGestures { focusManager.clearFocus() } },
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        when {
-            loading -> {
+        when (val p = profile) {
+            null -> {
                 Spacer(Modifier.height(24.dp))
                 CircularProgressIndicator()
             }
-            error != null -> {
-                Text("Error: $error", color = MaterialTheme.colorScheme.error)
-            }
             else -> {
-                val p = profile!!
-
                 // Avatar
                 Box(
                     modifier = Modifier
@@ -211,55 +202,39 @@ fun AccountScreenContent(
                 Spacer(Modifier.height(18.dp))
 
                 // Phone
-                LabeledField("Phone") {
-                    ReadOnlyBubble(text = p.phone.orEmpty())
-                }
-
+                LabeledField("Phone") { ReadOnlyBubble(text = p.phone.orEmpty()) }
                 Spacer(Modifier.height(12.dp))
 
                 // Display Name
-                LabeledField("Display Name") {
+                LabeledField("Display name") {
                     EditableBubble(
                         value = nameText,
                         onValueChange = { nameText = it },
                         isEditing = nameEditing,
-                        canSave = nameEditing && nameText.trim().isNotEmpty() && nameText.trim() != nameOriginal.trim(),
+                        canSave = nameText.isNotBlank() && nameText != nameOriginal,
                         onStartEdit = {
                             nameEditing = true
-                            nameFocusRequester.requestFocus()
-                            keyboardController?.show()
+                            nameOriginal = nameText
+                            scope.launch {
+                                // Small delay to ensure focus works properly
+                                kotlinx.coroutines.delay(10)
+                                nameFocusRequester.requestFocus()
+                            }
                         },
                         onSave = {
-                            val newName = nameText.trim()
-                            if (newName.isEmpty() || newName == nameOriginal.trim()) {
-                                nameEditing = false
-                                focusManager.clearFocus()
-                                keyboardController?.hide()
-                                return@EditableBubble
-                            }
                             scope.launch {
-                                snackbarHostState.currentSnackbarData?.dismiss()
-                                snackbarHostState.showSnackbar("Saving…")
-                                val result = runCatching { controller.updateDisplayName(newName) }
-                                snackbarHostState.currentSnackbarData?.dismiss()
-                                if (result.isSuccess) {
-                                    // Reflect locally right away
-                                    profile = profile?.copy(displayName = newName)
-                                    nameOriginal = newName
-                                    snackbarHostState.showSnackbar("Display name updated")
-                                } else {
-                                    nameText = nameOriginal
-                                    snackbarHostState.showSnackbar("Failed: ${result.exceptionOrNull()?.message}")
-                                }
+                                controller.updateDisplayName(nameText)
+                                nameEditing = false
+                                keyboardController?.hide()
+                                focusManager.clearFocus()
+                                snackbarHostState.showSnackbar("Display name updated successfully")
                             }
-                            nameEditing = false
-                            focusManager.clearFocus()
-                            keyboardController?.hide()
                         },
                         onCancel = {
                             nameText = nameOriginal
                             nameEditing = false
                             keyboardController?.hide()
+                            focusManager.clearFocus()
                         },
                         focusRequester = nameFocusRequester
                     )
@@ -267,48 +242,35 @@ fun AccountScreenContent(
 
                 Spacer(Modifier.height(12.dp))
 
-                // About
+// About
                 LabeledField("About") {
                     EditableBubble(
                         value = aboutText,
                         onValueChange = { aboutText = it },
                         isEditing = aboutEditing,
-                        canSave = aboutEditing && aboutText.trim() != aboutOriginal.trim(),
+                        canSave = aboutText != aboutOriginal,
                         onStartEdit = {
                             aboutEditing = true
-                            aboutFocusRequester.requestFocus()
-                            keyboardController?.show()
+                            aboutOriginal = aboutText
+                            scope.launch {
+                                kotlinx.coroutines.delay(10)
+                                aboutFocusRequester.requestFocus()
+                            }
                         },
                         onSave = {
-                            val newAbout = aboutText.trim()
-                            if (newAbout == aboutOriginal.trim()) {
-                                aboutEditing = false
-                                focusManager.clearFocus()
-                                keyboardController?.hide()
-                                return@EditableBubble
-                            }
                             scope.launch {
-                                snackbarHostState.currentSnackbarData?.dismiss()
-                                snackbarHostState.showSnackbar("Saving…")
-                                val result = runCatching { controller.updateAbout(newAbout) }
-                                snackbarHostState.currentSnackbarData?.dismiss()
-                                if (result.isSuccess) {
-                                    profile = profile?.copy(about = newAbout)
-                                    aboutOriginal = newAbout
-                                    snackbarHostState.showSnackbar("About updated")
-                                } else {
-                                    aboutText = aboutOriginal
-                                    snackbarHostState.showSnackbar("Failed: ${result.exceptionOrNull()?.message}")
-                                }
+                                controller.updateAbout(aboutText)
+                                aboutEditing = false
+                                keyboardController?.hide()
+                                focusManager.clearFocus()
+                                snackbarHostState.showSnackbar("About section updated successfully")
                             }
-                            aboutEditing = false
-                            focusManager.clearFocus()
-                            keyboardController?.hide()
                         },
                         onCancel = {
                             aboutText = aboutOriginal
                             aboutEditing = false
                             keyboardController?.hide()
+                            focusManager.clearFocus()
                         },
                         focusRequester = aboutFocusRequester
                     )
@@ -371,7 +333,6 @@ private fun EditableBubble(
                 .padding(vertical = 4.dp)
                 .focusRequester(focusRequester)
                 .onFocusChanged { state ->
-                    // Only cancel if we’re editing AND we actually lost focus (tap out)
                     if (isEditing && !state.isFocused) onCancel()
                 },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),

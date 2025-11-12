@@ -7,12 +7,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.lifecycle.lifecycleScope
 import com.example.cnnct.homepage.view.BottomNavigationBar
 import com.example.cnnct.settings.controller.AccountController
 import com.example.cnnct.settings.model.AccountRepository
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.launch
 
 class AccountActivity : ComponentActivity() {
     private val repo by lazy {
@@ -28,6 +31,11 @@ class AccountActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             val snackbarHostState = remember { SnackbarHostState() }
+
+            // Initial profile fetch
+            LaunchedEffect(Unit) {
+                lifecycleScope.launch { controller.refreshProfile() }
+            }
 
             Scaffold(
                 topBar = {

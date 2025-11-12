@@ -189,14 +189,19 @@ class CompleteProfileActivity : ComponentActivity() {
 
                             // Atomic transaction: reserve username, (optionally) reserve phone, update user
                             firestore.runTransaction { tx ->
-                                // Username reservation/validation
+                                // 🔹 Username reservation / validation
                                 val usernameSnap = tx.get(usernameRef)
                                 if (usernameSnap.exists()) {
                                     val owner = usernameSnap.getString("uid")
                                     if (owner != uid) {
                                         throw IllegalStateException("DISPLAY_TAKEN")
                                     }
+                                } else {
+                                    // Only create if it doesn't exist
+                                    tx.set(usernameRef, mapOf("uid" to uid))
                                 }
+
+                                // 🔹 If display name changed, remove old username reservation
                                 if (oldUsernameRef != null) {
                                     val oldSnap = tx.get(oldUsernameRef)
                                     if (oldSnap.exists()) {
@@ -206,19 +211,22 @@ class CompleteProfileActivity : ComponentActivity() {
                                         }
                                     }
                                 }
-                                tx.set(usernameRef, mapOf("uid" to uid))
 
-                                // Phone uniqueness (first-time only) — write { uid, email }
+                                // 🔹 Phone reservation — only if phone not locked and doc doesn’t exist
                                 if (phoneRef != null) {
                                     val phoneSnap = tx.get(phoneRef)
                                     if (phoneSnap.exists()) {
-                                        throw IllegalStateException("PHONE_TAKEN")
+                                        val owner = phoneSnap.getString("uid")
+                                        if (owner != uid) {
+                                            throw IllegalStateException("PHONE_TAKEN")
+                                        }
+                                    } else {
+                                        val email = auth.currentUser?.email ?: ""
+                                        tx.set(phoneRef, mapOf("uid" to uid, "email" to email))
                                     }
-                                    val email = auth.currentUser?.email ?: ""
-                                    tx.set(phoneRef, mapOf("uid" to uid, "email" to email))
                                 }
 
-                                // Merge user profile fields
+                                // 🔹 Merge user profile fields (safe update)
                                 tx.set(userRef, userPatch, SetOptions.merge())
                                 null
                             }.addOnSuccessListener {

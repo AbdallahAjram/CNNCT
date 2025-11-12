@@ -1,6 +1,8 @@
 package com.example.cnnct.notifications.view
 
+import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -8,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Notifications
@@ -19,14 +22,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.cnnct.notifications.NotifPrefs
 import com.example.cnnct.notifications.SettingsCache
 import com.example.cnnct.notifications.controller.NotificationSettingsViewModel
 import com.example.cnnct.notifications.model.NotificationSettings
+
 
 /**
  * Host composable that connects VM → UI. Keeps the pure UI stateless & previewable.
@@ -55,7 +61,7 @@ fun NotificationSettingsScreenHost(vm: NotificationSettingsViewModel) {
         onToggleCalls = vm::setCalls
     )
 }
-
+private val FooterGray = Color(0xFF6B7280)
 /**
  * Stateless UI. Easy to preview & test.
  */
@@ -67,8 +73,25 @@ fun NotificationSettingsScreen(
     onToggleChats: (Boolean) -> Unit,
     onToggleCalls: (Boolean) -> Unit
 ) {
+    val context = LocalContext.current
+
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Notification Settings") }) }
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("Notification Settings") },
+                navigationIcon = {
+                    IconButton(onClick = {
+                        // finish the current activity (go back)
+                        (context as? ComponentActivity)?.finish()
+                    }) {
+                        Icon(
+                            imageVector = Icons.Default.ArrowBack,
+                            contentDescription = "Back"
+                        )
+                    }
+                }
+            )
+        }
     ) { padding ->
         Column(
             modifier = Modifier
@@ -116,10 +139,20 @@ fun NotificationSettingsScreen(
                 else
                     "You can mute individual chats from the chat info screen."
             )
+
+            Spacer(Modifier.weight(1f))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("CNNCT© 2025", color = FooterGray, fontSize = 12.sp)
+            }
+
         }
     }
 }
-
 @Composable
 private fun SectionHeader(text: String) {
     Text(

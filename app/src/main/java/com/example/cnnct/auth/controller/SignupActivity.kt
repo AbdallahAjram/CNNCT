@@ -100,21 +100,15 @@ class SignupActivity : ComponentActivity() {
                 val phoneRef = firestore.collection("phones").document(phone) // unique by doc id
                 val usernameKey = normalizeDisplayName(displayName)
                 val usernameRef = firestore.collection("usernames").document(usernameKey)
+
                 val userDoc = hashMapOf(
                     "name" to name,
                     "displayName" to displayName,
                     "email" to email,
                     "phoneNumber" to phone,
-                    "photoUrl" to null,
-                    "notificationsEnabled" to true,
-                    "chatNotificationsEnabled" to true,
-                    "callNotificationsEnabled" to true,
-                    "fcmTokens" to emptyMap<String, Any>(),
-                    "platform" to "android",
                     "createdAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
-
 
                 // Transaction to ensure atomicity & uniqueness
                 firestore.runTransaction { tx ->

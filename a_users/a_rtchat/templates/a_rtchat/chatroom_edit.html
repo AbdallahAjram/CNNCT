@@ -1,0 +1,99 @@
+{% load static %}
+
+<form
+  method="post"
+  enctype="multipart/form-data"
+  hx-post="{% url 'edit-chatroom' chat_group.group_name %}"
+  hx-target="#group-edit-modal-body"
+  hx-swap="innerHTML"
+>
+  {% csrf_token %}
+  <div class="space-y-4">
+    <div>
+      <label class="block text-sm text-gray-300 mb-1">Group name</label>
+      {{ form.groupchat_name }}
+    </div>
+
+    {% if form.avatar %}
+    <div>
+      <label class="block text-sm text-gray-300 mb-1">Avatar</label>
+      {{ form.avatar }}
+    </div>
+    {% endif %}
+
+    {% if form.description %}
+    <div>
+      <label class="block text-sm text-gray-300 mb-1">Description</label>
+      {{ form.description }}
+    </div>
+    {% endif %}
+
+    <hr class="border-gray-700">
+
+    <div>
+      <label class="block text-sm text-gray-300 mb-2">Remove members</label>
+      <div class="max-h-40 overflow-y-auto space-y-1">
+        {% for m in chat_group.members.all %}
+          <label class="flex items-center gap-2 text-gray-200 text-sm">
+            <input type="checkbox" name="remove_members" value="{{ m.id }}"
+                   {% if m == chat_group.admin %}disabled{% endif %}>
+            <span class="truncate">
+              {{ m.profile.display_name|default:m.username }}
+              {% if m == chat_group.admin %}
+                <span class="text-xs text-amber-400">(admin)</span>
+              {% endif %}
+            </span>
+          </label>
+        {% empty %}
+          <div class="text-gray-400 text-sm">No members.</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="space-y-2">
+      <label class="block text-sm text-gray-300">Add members</label>
+      <input type="hidden" name="add_member_ids" id="add_member_ids">
+
+      {# 🔹 Search input: sends ?q=... to chat_user_search_pickable, updates #add-members-results #}
+      <input
+        name="q"
+        type="text"
+        placeholder="Search users…"
+        autocomplete="off"
+        class="w-full rounded-lg bg-gray-800 text-gray-100 px-3 py-2"
+        hx-get="{% url 'chat_user_search_pickable' %}"
+        hx-target="#add-members-results"
+        hx-trigger="keyup changed delay:300ms"
+        hx-swap="innerHTML"
+      >
+
+      <div id="add-members-results" class="mt-2 text-sm text-gray-200">
+        {# HTMX will render a_rtchat/partials/user_search_pickable.html here #}
+      </div>
+
+      <div class="text-xs text-gray-400">
+        Tip: tick the checkboxes to add; we'll pack them into the form on save.
+      </div>
+    </div>
+  </div>
+
+  <div class="mt-6 flex justify-end gap-2">
+    <button type="button" class="px-3 py-2 rounded-lg bg-gray-700 text-gray-100" onclick="closeGroupEdit()">Cancel</button>
+    <button type="submit" class="px-3 py-2 rounded-lg bg-indigo-600 text-white">Save</button>
+  </div>
+
+  <script>
+    // Collect checked users from the pickable list into hidden input before submit
+    (function ensurePackOnSubmit(){
+      const form = document.currentScript.closest('form');
+      if (!form) return;
+
+      form.addEventListener('submit', function() {
+        const picks = Array.from(
+          document.querySelectorAll('#add-members-results input[type=checkbox][name="user_ids"]:checked')
+        ).map(el => el.value);
+        document.getElementById('add_member_ids').value = picks.join(',');
+      }, { once: true });
+    })();
+  </script>
+</form>

@@ -84,13 +84,6 @@ class UserSettingsRepository(
     suspend fun setMutedChats(chatIds: List<String>) {
         update(mapOf("mutedChats" to chatIds))
     }
-    suspend fun setChatNotificationsEnabled(enabled: Boolean) {
-        userDoc().update("chatNotificationsEnabled", enabled).await()
-    }
-    suspend fun setCallNotificationsEnabled(enabled: Boolean) {
-        userDoc().update("callNotificationsEnabled", enabled).await()
-    }
-
 
     // region Helpers
 
@@ -105,15 +98,10 @@ class UserSettingsRepository(
     ): UserSettings {
         val readReceipts = getBoolean("readReceipts") ?: defaults.readReceipts
         val notificationsEnabled = getBoolean("notificationsEnabled") ?: defaults.notificationsEnabled
-        val chatEnabled = getBoolean("chatNotificationsEnabled") ?: defaults.chatNotificationsEnabled
-        val callEnabled = getBoolean("callNotificationsEnabled") ?: defaults.callNotificationsEnabled
         val mutedChats = (get("mutedChats") as? List<*>)?.filterIsInstance<String>() ?: defaults.mutedChats
-
         return UserSettings(
             readReceipts = readReceipts,
             notificationsEnabled = notificationsEnabled,
-            chatNotificationsEnabled = chatEnabled,
-            callNotificationsEnabled = callEnabled,
             mutedChats = mutedChats
         )
     }

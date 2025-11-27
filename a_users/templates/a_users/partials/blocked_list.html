@@ -4,7 +4,7 @@
   <li class="py-2 flex items-center justify-between">
     <div class="text-sm">
       <div class="text-gray-900">@{{ bu.blocked.username }}</div>
-      <div class="text-gray-500">{{ bu.blocked.profile.phone|default:'No phone' }}</div>
+      <div class="text-gray-500">{{ bu.blocked.profile.phone_number|default:'No phone' }}</div>
     </div>
     <a href="{% url 'profile-unblock-user' bu.blocked.username %}" class="px-3 py-1.5 rounded-md bg-gray-800 text-gray-200 hover:bg-gray-700 text-sm">Unblock</a>
   </li>

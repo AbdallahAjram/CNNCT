@@ -1,12 +1,12 @@
 package com.cnnct.chat.mvc.view
 
-import android.widget.Toast
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.AttachFile
@@ -25,14 +25,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.runtime.MutableState
-import androidx.compose.material.icons.rounded.Call
-import androidx.compose.material.icons.rounded.MoreVert
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.text.style.TextOverflow
 import com.example.cnnct.common.view.UserAvatar
 
 /* ===== Presence ===== */
@@ -47,22 +39,16 @@ fun SelectionTopBar(
     canEdit: Boolean,
     onClose: () -> Unit,
     onEdit: () -> Unit,
-    onDeleteClick: () -> Unit,
-    onAiSuggest: (() -> Unit)? = null // ✅ NEW PARAM
+    onDeleteClick: () -> Unit
 ) {
     TopAppBar(
         navigationIcon = {
             IconButton(onClick = onClose) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close selection")
+                Icon(Icons.Filled.ArrowBack, contentDescription = "Close selection")
             }
         },
         title = { Text("$count selected") },
         actions = {
-            if (onAiSuggest != null) {
-                IconButton(onClick = onAiSuggest) {
-                    Icon(Icons.Filled.SmartToy, contentDescription = "AI Suggest") // ✅ New AI button
-                }
-            }
             IconButton(onClick = onEdit, enabled = canEdit) {
                 Icon(Icons.Filled.Edit, contentDescription = "Edit")
             }
@@ -73,96 +59,47 @@ fun SelectionTopBar(
     )
 }
 
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TopBar(
     title: String,
     subtitle: String?,
     presence: Presence,
-    photoUrl: String?,
+    photoUrl: String? = null,
     onBack: () -> Unit,
-    onCallClick: () -> Unit,
-    onHeaderClick: () -> Unit,
-
-    chatType: String = "private",
-
-    onSearch: (() -> Unit)? = null,
-    onClearChat: (() -> Unit)? = null,
-    onBlockPeer: (() -> Unit)? = null,
-    onLeaveGroup: (() -> Unit)? = null
+    onCallClick: () -> Unit
 ) {
-    var menuOpen by remember { mutableStateOf(false) }
-
     TopAppBar(
         navigationIcon = {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
             }
         },
         title = {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onHeaderClick() },
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                AvatarWithStatus(size = 42.dp, presence = presence, photoUrl = photoUrl)
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    if (!subtitle.isNullOrBlank()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AvatarWithStatus(size = 36.dp, presence = presence, photoUrl = photoUrl)
+                Spacer(Modifier.width(8.dp))
+                Column {
+                    Text(text = title, style = MaterialTheme.typography.titleMedium)
+                    if (subtitle != null) {
                         Text(
                             text = subtitle,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
             }
         },
         actions = {
-            if (chatType == "private") {
-                IconButton(onClick = onCallClick) {
-                    Icon(Icons.Rounded.Call, contentDescription = "Call")
-                }
-            }
-            IconButton(onClick = { menuOpen = true }) {
-                Icon(Icons.Rounded.MoreVert, contentDescription = "More")
-            }
-
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                if (onSearch != null) {
-                    DropdownMenuItem(text = { Text("Search") }, onClick = {
-                        menuOpen = false; onSearch()
-                    })
-                }
-                if (onClearChat != null) {
-                    DropdownMenuItem(text = { Text("Clear chat") }, onClick = {
-                        menuOpen = false; onClearChat()
-                    })
-                }
-                if (chatType == "private" && onBlockPeer != null) {
-                    DropdownMenuItem(text = { Text("Block") }, onClick = {
-                        menuOpen = false; onBlockPeer()
-                    })
-                }
-                if (chatType == "group" && onLeaveGroup != null) {
-                    DropdownMenuItem(text = { Text("Leave group") }, onClick = {
-                        menuOpen = false; onLeaveGroup()
-                    })
-                }
+            IconButton(onClick = onCallClick) {
+                Icon(Icons.Filled.Call, contentDescription = "Voice call")
             }
         }
     )
 }
+
+/* ===== Small components ===== */
 
 @Composable
 fun AvatarWithStatus(
@@ -231,10 +168,10 @@ fun DayDivider(label: String) {
 @Composable
 fun Ticks(sent: Boolean, delivered: Boolean, read: Boolean) {
     val color = when {
-        read -> Color(0xFF34B7F1) // Blue when read
-        delivered -> Color.Gray // when delivered but not read
-        sent -> Color.Gray // Gray when just sent
-        else -> Color.Gray.copy(alpha = 0.4f) // Very light gray when not sent
+        read -> Color(0xFF34B7F1)
+        delivered -> Color.Gray
+        sent -> Color.Gray
+        else -> Color.Gray.copy(alpha = 0.4f)
     }
     val text = when {
         read -> "✓✓"
@@ -242,28 +179,15 @@ fun Ticks(sent: Boolean, delivered: Boolean, read: Boolean) {
         sent -> "✓"
         else -> "•"
     }
-
-    // Debug text to see what's happening
-    val debugText = when {
-        read -> " (read)"
-        delivered -> " (delivered)"
-        sent -> " (sent)"
-        else -> " (sending)"
-    }
-
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(text, color = color, style = MaterialTheme.typography.labelSmall)
-        // Uncomment for debugging:
-        // Text(debugText, color = Color.Red, style = MaterialTheme.typography.labelSmall, fontSize = 8.sp)
-    }
+    Text(text, color = color, style = MaterialTheme.typography.labelSmall)
 }
+
 @Composable
 fun MessageInput(
-    textState: MutableState<String>,
     onSend: (String) -> Unit,
     onAttach: (() -> Unit)? = null
 ) {
-    val text = textState
+    var text = remember { mutableStateOf("") }
     val canSend = text.value.isNotBlank()
     val keyboard = LocalSoftwareKeyboardController.current
 

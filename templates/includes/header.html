@@ -188,26 +188,30 @@
         <nav class="nav">
             <ul class="nav-items">
                 {% if request.user.is_authenticated %}
-                    <!-- Menu dropdown removed entirely per request -->
-
-                    <!-- Avatar Dropdown -->
-                    <li class="dropdown-container">
-                        <a class="dropdown-trigger" onclick="toggleDropdown('avatar-dropdown')" aria-haspopup="true" aria-expanded="false">
-                            <img class="avatar" src="{{ request.user.profile.avatar }}" alt="Avatar" />
-                            {{ request.user.profile.name }}
-                            <img id="avatar-dropdown-icon" class="dropdown-icon" src="https://img.icons8.com/small/32/ffffff/expand-arrow.png" alt="Expand" />
-                        </a>
-                        <div id="avatar-dropdown" class="dropdown-menu" style="min-width:220px; right:0; left:auto;">
-                            <ul class="dropdown-list">
-                                <li><a href="{% url 'home' %}">Home</a></li>
-                                <li><a href="{% url 'profile' %}">My Profile</a></li>
-                                <li><a href="{% url 'new-groupchat' %}">New Group</a></li>
-                                <li><a href="{% url 'profile-settings' %}">Settings</a></li>
-                                <li style="border-top:1px solid #e5e7eb;margin:6px 0"></li>
-                                <li><a href="{% url 'account_logout' %}">Log Out</a></li>
-                            </ul>
-                        </div>
-                    </li>
+                <li class="dropdown-container">
+                    <a class="dropdown-trigger" onclick="toggleDropdown('avatar-dropdown')" aria-haspopup="true" aria-expanded="false">
+                        {% with profile=navbar_profile %}
+                        <img class="avatar"
+                            src="{{ profile.avatar }}{% if profile.updated_at %}?v={{ profile.updated_at|date:'U' }}{% endif %}"
+                            alt="Avatar"
+                            data-fallback="{% static 'images/avatar.svg' %}"
+                            onerror="this.src=this.getAttribute('data-fallback');" />
+                        <span>{{ profile.display_name|default:profile.user.username }}</span>
+                        {% endwith %}
+                        <img id="avatar-dropdown-icon" class="dropdown-icon"
+                             src="https://img.icons8.com/small/32/ffffff/expand-arrow.png" alt="Expand" />
+                    </a>
+                    <div id="avatar-dropdown" class="dropdown-menu" style="min-width:220px; right:0; left:auto;">
+                        <ul class="dropdown-list">
+                            <li><a href="{% url 'home' %}">Home</a></li>
+                            <li><a href="{% url 'profile' %}">My Profile</a></li>
+                            {# removed: New Group from navbar; creation stays in New Chat UI #}
+                            <li><a href="{% url 'profile-settings' %}">Settings</a></li>
+                            <li style="border-top:1px solid #e5e7eb;margin:6px 0"></li>
+                            <li><a href="{% url 'account_logout' %}">Log Out</a></li>
+                        </ul>
+                    </div>
+                </li>                
                     
                 {% else %}
                     <li><a href="{% url 'account_login' %}">Login</a></li>

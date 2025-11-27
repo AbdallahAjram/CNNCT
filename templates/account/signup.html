@@ -25,6 +25,15 @@
                     <span class="font-medium">{% trans "Get it on Android" %}</span>
                 </a>
             </div>
+            <!-- QR promo block (visible on all breakpoints) -->
+            <div class="mt-4 flex items-center justify-center">
+                <div class="text-center">
+                    <div class="text-sm text-gray-700 mb-2">{% trans "Want to see how this was made?" %}</div>
+                    <div class="inline-block rounded-xl p-2 bg-white border border-gray-200">
+                        <img src="{% static 'images/frame-colored.png' %}" alt="Open the app page" class="w-40 h-40 object-contain" />
+                    </div>
+                </div>
+            </div>
             <div class="flex items-center justify-between">
                 <a href="{% url 'account_login' %}" class="text-indigo-600 hover:text-indigo-500 font-medium">{% trans "Back to Sign in" %}</a>
                 <span class="text-xs text-gray-400">{% trans "Questions? Contact support." %}</span>

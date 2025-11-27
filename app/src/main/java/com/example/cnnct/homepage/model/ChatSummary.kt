@@ -1,35 +1,18 @@
-// file: com/example/cnnct/homepage/model/ChatSummary.kt
 package com.example.cnnct.homepage.model
 
-import androidx.annotation.Keep
-import com.google.firebase.Timestamp
 import com.google.firebase.firestore.IgnoreExtraProperties
 
-@Keep
 @IgnoreExtraProperties
 data class ChatSummary(
-    var id: String = "",                 // will be filled from doc.id
-
-    var groupName: String? = null,
-    var lastMessageText: String = "",
-    var lastMessageTimestamp: Timestamp? = null,
-    var lastMessageSenderId: String? = null,
-    var members: List<String> = emptyList(),
-    var lastMessageIsRead: Boolean = false,
-    var type: String = "private",
-
-    var createdAt: Timestamp? = null,
-    var updatedAt: Timestamp? = null,
-    var lastMessageStatus: String? = null,
-
-    // optional flags you had
-    var iBlockedPeer: Boolean? = null,
-    var blockedByOther: Boolean? = null,
-
-    // (optional, future-proof)
-    var groupPhotoUrl: String? = null,
-
-    // 🔵 Computed locally (not persisted): badge count for unread on Home row.
-    // With the current data model, this will effectively be 0 or 1.
-    var unreadCount: Int = 0
+    val id: String = "",
+    val type: String = "private",            // "private" | "group"
+    val members: List<String> = emptyList(),
+    val groupName: String? = null,
+    val lastMessageText: String = "",        // non-null → provide default
+    val lastMessageTimestamp: com.google.firebase.Timestamp? = null,
+    val lastMessageSenderId: String? = null,
+    val createdAt: com.google.firebase.Timestamp? = null,
+    val updatedAt: com.google.firebase.Timestamp? = null,
+    val lastMessageIsRead: Boolean = false,   // legacy support
+    val lastMessageStatus: String? = null
 )

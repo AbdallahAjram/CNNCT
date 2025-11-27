@@ -1,0 +1,94 @@
+{% load static %}
+<div id="group-settings-backdrop" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+  <div class="bg-[#0b1222] w-full max-w-2xl rounded-2xl shadow-xl border border-gray-800">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+      <h3 class="text-gray-100 font-semibold">Edit group</h3>
+      <button class="text-gray-400 hover:text-gray-200"
+              onclick="document.getElementById('group-settings-backdrop')?.remove()">✕</button>
+    </div>
+
+    <div class="p-5 space-y-6">
+      <!-- Meta (name + avatar) -->
+      <form hx-post="{% url 'group-update' group.group_name %}"
+            hx-encoding="multipart/form-data"
+            hx-target="#group-settings-backdrop"
+            hx-swap="outerHTML"
+            class="space-y-4">
+        <div class="grid grid-cols-1 md:grid-cols-[120px_1fr] gap-4 items-center">
+          <div class="flex items-center gap-3">
+            <img src="{{ group.avatar|default:'{% static "images/group-default.svg" %}' }}" class="w-16 h-16 rounded-full object-cover border border-gray-700">
+            <label class="text-sm text-gray-300">
+              <span class="block mb-1">Change avatar</span>
+              <input type="file" name="avatar" accept="image/*" class="text-gray-300 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:bg-gray-700 file:text-gray-100">
+            </label>
+          </div>
+          <div>
+            <label class="text-sm text-gray-300">Group name</label>
+            <input type="text" name="group_name" value="{{ group.groupchat_name }}"
+                   class="mt-1 w-full rounded-lg bg-gray-800 text-gray-100 px-3 py-2 border border-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          </div>
+        </div>
+        <div class="flex justify-end gap-2">
+          <button type="button" class="px-4 py-2 rounded-lg bg-gray-700 text-gray-100"
+                  onclick="document.getElementById('group-settings-backdrop')?.remove()">Cancel</button>
+          <button class="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500">Save</button>
+        </div>
+      </form>
+
+      <!-- Members -->
+      <div class="border-t border-gray-800 pt-5">
+        <h4 class="text-gray-100 font-semibold mb-3">Members ({{ members|length }})</h4>
+
+        <form hx-post="{% url 'group-update-members' group.group_name %}"
+              hx-target="#group-settings-backdrop"
+              hx-swap="outerHTML"
+              class="space-y-4">
+          <div class="flex items-center gap-3">
+            <input id="member-search" type="text" placeholder="Search users to add..."
+                   class="w-full rounded-lg bg-gray-800 text-gray-100 px-3 py-2 border border-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                   hx-get="{% url 'chat_user_search_pickable' %}"
+                   hx-trigger="keyup changed delay:300ms"
+                   hx-params="*"
+                   hx-target="#pickable-results"
+                   hx-swap="innerHTML">
+            <input type="hidden" name="add_ids" id="add_ids">
+            <button type="button"
+                    onclick="collectPickableAndSubmit(this)"
+                    class="px-3 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500">Add selected</button>
+          </div>
+          <div id="pickable-results" class="space-y-2 text-sm text-gray-300"></div>
+
+          <!-- Existing members list with remove toggles -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {% for u in members %}
+              <label class="flex items-center gap-3 p-2 rounded-lg bg-gray-800 border border-gray-700">
+                <img src="{{ u.profile.avatar }}" class="w-8 h-8 rounded-full object-cover">
+                <span class="text-gray-100 truncate">{{ u.profile.display_name|default:u.username }}</span>
+                {% if u == group.admin %}
+                  <span class="ml-auto text-xs px-2 py-0.5 rounded bg-amber-600 text-white">Admin</span>
+                {% else %}
+                  <input type="checkbox" name="remove_ids" value="{{ u.id }}" class="ml-auto">
+                {% endif %}
+              </label>
+            {% endfor %}
+          </div>
+          <div class="flex justify-end">
+            <button class="px-3 py-2 rounded-lg bg-rose-600 text-white hover:bg-rose-500">Remove selected</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function collectPickableAndSubmit(btn){
+    const container = document.getElementById('pickable-results');
+    const checked = container ? Array.from(container.querySelectorAll('input[type="checkbox"][name="user_ids"]:checked')).map(x=>x.value) : [];
+    document.getElementById('add_ids').value = checked.join(',');
+    // submit enclosing form
+    let form = btn.closest('form');
+    if(form){ form.requestSubmit(); }
+  }
+</script>
+

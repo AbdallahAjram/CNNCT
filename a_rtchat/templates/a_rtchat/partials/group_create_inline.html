@@ -1,0 +1,107 @@
+{% load static %}
+<div class="p-3 border-b border-gray-800 text-gray-200 font-semibold">Create a group</div>
+
+<div class="p-3">
+  <form id="group-create-form"
+        hx-post="{% url 'create_groupchat' %}"
+        hx-target="#group-create-form"
+        hx-swap="outerHTML">
+    {% csrf_token %}
+
+    <!-- Group Name -->
+    <label class="block text-gray-300 text-sm mb-1">Group name</label>
+    <input type="text" name="groupchat_name" required
+           class="w-full mb-3 rounded-xl px-3 py-2 bg-gray-800 text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+           placeholder="Team meetup!">
+
+    <!-- Member picker -->
+    <label class="block text-gray-300 text-sm mb-1">Add members</label>
+
+    <div class="relative">
+      <input id="group-user-search"
+             type="text"
+             name="q"
+             autocomplete="off"
+             placeholder="Search by username, display name, or phone"
+             class="w-full rounded-xl pl-10 pr-4 py-2 bg-gray-800 text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+             hx-get="{% url 'chat_user_search' %}"
+             hx-trigger="keyup changed delay:250ms"
+             hx-target="#group-user-results"
+             hx-swap="innerHTML"
+             hx-include="#group-mode">
+      <svg viewBox="0 0 24 24" class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" fill="currentColor" aria-hidden="true">
+        <path d="M10 4a6 6 0 104.472 10.034l3.747 3.747a1 1 0 001.415-1.415l-3.747-3.747A6 6 0 0010 4zm-4 6a4 4 0 118 0 4 4 0 01-8 0z"/>
+      </svg>
+      <input id="group-mode" type="hidden" name="mode" value="pickable">
+    </div>
+
+    <div id="selected-members" class="flex flex-wrap gap-2 mt-2"></div>
+    <input type="hidden" name="member_ids" id="member_ids" value="">
+
+    <div id="group-user-results" class="mt-2 bg-gray-900 rounded-lg overflow-hidden border border-gray-800">
+      <div class="text-gray-400 text-sm p-3">Start typing to find people…</div>
+    </div>
+
+    <div class="mt-4 flex items-center gap-2">
+      <button type="submit" class="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm hover:bg-indigo-500">
+        Create Group
+      </button>
+      <button type="button" class="px-3 py-2 rounded-xl bg-gray-700 text-gray-100 text-sm hover:bg-gray-600"
+              onclick="openNewChat()">Back to Direct</button>
+    </div>
+  </form>
+</div>
+
+<script>
+  window.__selectedMemberIds = window.__selectedMemberIds || new Set();
+
+  function updateSelectedChips(){
+    const wrap = document.getElementById('selected-members');
+    const hidden = document.getElementById('member_ids');
+    if(!wrap || !hidden) return;
+
+    wrap.innerHTML = '';
+    Array.from(window.__selectedMemberIds).forEach(({id, username, name})=>{
+      const chip = document.createElement('span');
+      chip.className = 'inline-flex items-center gap-2 px-2 py-1 rounded-full bg-gray-800 text-gray-200 text-xs';
+      chip.innerHTML = `<span class="truncate max-w-[140px]">${name || username}</span>
+                        <button type="button" class="ml-1 text-gray-400 hover:text-red-400"
+                          onclick="removeSelectedMember('${id}')">&times;</button>`;
+      wrap.appendChild(chip);
+    });
+
+    hidden.value = Array.from(window.__selectedMemberIds).map(x=>x.id).join(',');
+  }
+
+  function removeSelectedMember(id){
+    const items = Array.from(window.__selectedMemberIds);
+    for(const it of items){
+      if(it.id === id){ window.__selectedMemberIds.delete(it); break; }
+    }
+    updateSelectedChips();
+    document.querySelectorAll(`input[type="checkbox"][data-user-id="${CSS.escape(id)}"]`)
+      .forEach(cb => cb.checked = false);
+  }
+
+  function togglePick(checkbox){
+    const id = checkbox.getAttribute('data-user-id');
+    const username = checkbox.getAttribute('data-username') || '';
+    const name = checkbox.getAttribute('data-name') || '';
+    if(checkbox.checked){
+      window.__selectedMemberIds.add({id, username, name});
+    }else{
+      removeSelectedMember(id);
+      return;
+    }
+    updateSelectedChips();
+  }
+
+  document.addEventListener('htmx:afterSwap', (e)=>{
+    if(e.target && (e.target.id === 'group-user-results' || e.target.id === 'group-create-form')){
+      updateSelectedChips();
+    }
+  });
+
+  window.togglePick = togglePick;
+  window.removeSelectedMember = removeSelectedMember;
+</script>

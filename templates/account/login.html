@@ -1,42 +1,122 @@
-{% extends "account/base_entrance.html" %}
+{% extends "base.html" %}
 {% load i18n %}
-{% load allauth account %}
 {% load static %}
+
 {% block head_title %}
     {% trans "Login" %}
 {% endblock head_title %}
-{% block content %}
-<div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
-    <div class="hidden md:flex items-center justify-center">
-        <img src="{% static 'images/logo.svg' %}" alt="Logo" class="max-w-[260px] w-full opacity-90" onerror="this.style.display='none'"/>
-    </div>
-    <div>
-        <h1 class="text-2xl font-semibold mb-2">{% trans "Sign in" %}</h1>
-        {% url 'account_login' as login_url %}
-        {% element form form=form method="post" action=login_url tags="entrance,login" %}
-            {% slot body %}
-                {% csrf_token %}
-                <div class="space-y-4">
-                    {% element fields form=form unlabeled=True %}{% endelement %}
-                    {% if redirect_field_value %}
-                        <input type="hidden" name="{{ redirect_field_name }}" value="{{ redirect_field_value }}" />
-                    {% endif %}
-                </div>
-            {% endslot %}
-            {% slot actions %}
-                {% element button type="submit" tags="prominent,login" %}
-                    {% trans "Sign In" %}
-                {% endelement %}
-            {% endslot %}
-        {% endelement %}
-        <p class="text-gray-500 text-sm mt-4">
+
+{% block layout %}
+<!-- Full-page gradient background - now darker -->
+<content class="block w-full min-h-screen bg-gradient-to-r from-[#0c0b1e] via-[#1b1a34] to-[#070a18] text-gray-100">
+
+  <!-- Centered inner login box -->
+  <div class="flex items-center justify-center min-h-[calc(100vh-80px)] px-6 py-10">
+    <div class="w-full max-w-5xl bg-[#1c1b3f]/90 border border-gray-800 rounded-2xl shadow-xl p-8 md:p-10">
+      
+      <!-- Two-column layout with smaller gap -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-3 items-start">
+        
+        <!-- Left: login form -->
+        <div class="pr-2">
+          <h1 class="text-xl md:text-2xl font-semibold mb-1">{% trans "Sign in" %}</h1>
+          <p class="text-gray-400 mb-4 text-sm">Sign in with your email address.</p>
+
+          <div class="space-y-2">
+            <input
+              type="email"
+              id="email"
+              placeholder="Email address"
+              class="w-72 p-1.5 md:p-2 rounded-md bg-[#0f1128] border border-gray-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm"
+              required
+            />
+            <input
+              type="password"
+              id="password"
+              placeholder="Password"
+              class="w-72 p-1.5 md:p-2 rounded-md bg-[#0f1128] border border-gray-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm"
+              required
+            />
+
+            <button
+              id="login-btn"
+              class="w-72 py-1.5 md:py-2 rounded-md bg-gradient-to-r from-indigo-600 to-purple-600 font-medium text-white hover:opacity-90 transition text-sm"
+            >
+              {% trans "Sign In" %}
+            </button>
+
+            <button
+              id="google-btn"
+              class="w-72 py-1.5 md:py-2 rounded-md bg-white text-gray-800 font-medium hover:bg-gray-100 transition text-sm"
+              disabled
+            >
+              Continue with Google (coming soon)
+            </button>
+          </div>
+
+          <div id="error-box" class="hidden bg-red-600/80 text-white p-2.5 mt-3 rounded-md text-center text-sm"></div>
+
+          <p class="text-gray-500 text-xs mt-5 leading-relaxed">
             {% trans "Account creation is only available in our mobile app. Please use the app to create a new account." %}
-        </p>
-        {% if SOCIALACCOUNT_ENABLED %}
-            <div class="mt-6">
-                {% include "socialaccount/snippets/login.html" with page_layout="entrance" %}
-            </div>
-        {% endif %}
+          </p>
+        </div>
+
+        <!-- Right: logo + QR -->
+        <div class="flex flex-col items-center justify-start space-y-2 md:space-y-3 pt-4">
+          <img src="{% static 'images/cnnct-high-resolution-logo__1_-removebg-preview copy.png' %}" alt="Logo" class="max-w-[260px] w-full opacity-90" />
+          <div class="text-center">
+            <div class="text-sm text-gray-300 mb-1">Want to see how this was made?</div>
+            <a href="/" target="_blank" class="inline-block rounded-xl p-2 bg-gray-900/60 border border-gray-700 hover:bg-gray-800 transition">
+              <img src="{% static 'images/frame-colored.png' %}" alt="Open app page" class="w-36 h-36 object-contain" />
+            </a>
+          </div>
+        </div>
+      </div>
     </div>
-</div>
-{% endblock content %}
+  </div>
+</content>
+
+<script>
+  const auth = firebase.auth();
+
+  document.getElementById("login-btn").addEventListener("click", async () => {
+    const email = document.getElementById("email").value.trim();
+    const password = document.getElementById("password").value.trim();
+    const errorBox = document.getElementById("error-box");
+    errorBox.style.display = "none";
+
+    if (!email || !password) {
+      errorBox.textContent = "Please enter email and password.";
+      errorBox.style.display = "block";
+      return;
+    }
+
+    try {
+      console.log("🔐 Signing in:", email);
+      const result = await auth.signInWithEmailAndPassword(email, password);
+      const idToken = await result.user.getIdToken(true);
+
+      const resp = await fetch("/auth/firebase/session-login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": "{{ csrf_token }}"
+        },
+        credentials: "include",
+        body: JSON.stringify({ idToken }),
+      });
+
+      const data = await resp.json();
+      if (resp.ok && data.ok) {
+        window.location.href = "/";
+      } else {
+        errorBox.textContent = data.error || "Session login failed.";
+        errorBox.style.display = "block";
+      }
+    } catch (err) {
+      errorBox.textContent = err.message;
+      errorBox.style.display = "block";
+    }
+  });
+</script>
+{% endblock layout %}

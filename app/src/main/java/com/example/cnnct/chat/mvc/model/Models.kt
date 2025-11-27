@@ -3,14 +3,14 @@ package com.cnnct.chat.mvc.model
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.GeoPoint
 
-enum class MessageType { text, image, video, file, location }
+enum class MessageType { text, image,video, file, location }
 
 data class Message(
     val id: String = "",
     val senderId: String = "",
     val type: MessageType = MessageType.text,
-    val text: String? = null,
-    val mediaUrl: String? = null,
+    val text: String? = null,             // message text OR filename/caption for attachments
+    val mediaUrl: String? = null,         // Storage download URL
     val location: GeoPoint? = null,
 
     // Attachment metadata

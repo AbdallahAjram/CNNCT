@@ -1,0 +1,101 @@
+{% load static %}
+{% load widget_tweaks %}
+
+<div id="edit-group-modal" class="fixed inset-0 z-50 flex items-center justify-center">
+  <div class="fixed inset-0 bg-black/50" onclick="document.getElementById('edit-group-modal')?.remove()"></div>
+  <div class="relative bg-[#0f172a] border border-gray-800 rounded-2xl w-full max-w-lg p-4">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-gray-100 font-semibold">Edit group</h2>
+      <button class="text-gray-400 hover:text-gray-200" onclick="document.getElementById('edit-group-modal')?.remove()">✕</button>
+    </div>
+    <form
+      method="post"
+      hx-post="{% url 'edit-chatroom' chat_group.group_name %}"
+      hx-target="#edit-group-modal"
+      hx-swap="outerHTML"
+      class="space-y-4"
+    >
+      {% csrf_token %}
+      {{ form.non_field_errors }}
+      
+      <!-- Group name -->
+      <div>
+        <label class="block text-sm text-gray-300 mb-1">Group name</label>
+        {{ form.groupchat_name|add_class:"w-full rounded-lg bg-gray-800 border border-gray-700 text-gray-100 p-2" }}
+      </div>
+
+      <!-- Remove members -->
+      <div>
+        <label class="block text-sm text-gray-300 mb-1">Remove members</label>
+        <div class="max-h-40 overflow-y-auto border border-gray-700 rounded-lg p-2">
+          {% for m in chat_group.members.all %}
+            {% if m != chat_group.admin %}
+              <label class="flex items-center gap-2 py-1">
+                <input type="checkbox" name="remove_members" value="{{ m.id }}" class="rounded border-gray-600 bg-gray-800">
+                <span class="text-gray-200 text-sm">{{ m.profile.display_name|default:m.username }}</span>
+              </label>
+            {% endif %}
+          {% empty %}
+            <p class="text-gray-400 text-sm">No removable members.</p>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Add members -->
+      <div>
+        <label class="block text-sm text-gray-300 mb-1">Add members</label>
+        <input
+          type="text"
+          class="w-full rounded-lg bg-gray-800 border border-gray-700 text-gray-100 p-2 mb-2"
+          placeholder="Search by name, display name, email or phone"
+          hx-get="{% url 'chat_user_search_pickable' %}"
+          hx-trigger="keyup changed delay:300ms"
+          hx-target="#add-members-results"
+          hx-params="*"
+          name="q"
+          autocomplete="off"
+        >
+        <div id="add-members-results" class="mt-2 bg-gray-900 rounded-lg overflow-hidden border border-gray-800 max-h-48 overflow-y-auto">
+          <!-- Results will be populated by HTMX -->
+        </div>
+        <input type="hidden" name="add_member_ids" id="id_add_member_ids" value="">
+      </div>
+
+      <div class="flex items-center justify-end gap-2">
+        <button type="button" class="px-3 py-2 rounded-lg bg-gray-700 text-gray-100" onclick="document.getElementById('edit-group-modal')?.remove()">Cancel</button>
+        <button type="submit" class="px-3 py-2 rounded-lg bg-indigo-600 text-white">Save</button>
+      </div>
+    </form>
+  </div>
+  <script>
+    // Sync picked members for edit group modal
+    function syncPickedMembersEdit() {
+      const container = document.querySelector('#add-members-results');
+      const hidden = document.querySelector('#id_add_member_ids');
+      if (!container || !hidden) return;
+
+      const updateHidden = () => {
+        const ids = Array.from(
+          container.querySelectorAll('input[type="checkbox"][data-user-id]:checked')
+        ).map(cb => cb.getAttribute('data-user-id'));
+        hidden.value = ids.join(',');
+      };
+
+      container.addEventListener('change', (e) => {
+        if (e.target.matches('input[type="checkbox"][data-user-id]')) {
+          updateHidden();
+        }
+      });
+
+      // Also update on HTMX swaps
+      document.addEventListener('htmx:afterSwap', (e) => {
+        if (e.target && e.target.id === 'add-members-results') {
+          updateHidden();
+        }
+      });
+    }
+
+    // Initialize when modal loads
+    syncPickedMembersEdit();
+  </script>
+</div>

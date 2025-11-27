@@ -1,10 +1,15 @@
 from pathlib import Path
+import logging
+import os
+from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Hardcode SECRET_KEY and DEBUG for now to avoid env issues
-SECRET_KEY = '5e4rhby#tw_ocxd8a(dwj4tdi_b+bu6l#jt8f3_(c8fio-10vz'
-DEBUG = True  # or False, whatever you want
+env_path = BASE_DIR / ".env"
+load_dotenv(dotenv_path=str(env_path), encoding="utf-8-sig")
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
+
+DEBUG = True  
 
 ALLOWED_HOSTS = ['localhost', '127.0.0.1', '*']
 
@@ -49,7 +54,7 @@ if DEBUG:
     MIDDLEWARE += ['django_browser_reload.middleware.BrowserReloadMiddleware']
 
 AUTHENTICATION_BACKENDS = [
-    'a_users.auth_backends.PhoneOrUsernameOrEmailBackend',
+    'a_users.auth_backends.FirebaseBackend',
     'django.contrib.auth.backends.ModelBackend',
     'allauth.account.auth_backends.AuthenticationBackend',
 ]
@@ -68,6 +73,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'a_home.cprocs.project_title',
+                'a_users.context_processors.user_profile_context',
             ],
         },
     },
@@ -99,7 +105,7 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Beirut'
 USE_I18N = True
 USE_TZ = True
 
@@ -111,9 +117,23 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'
 
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
 ACCOUNT_LOGIN_METHODS = {'email', 'username'}  # keep for allauth forms; backend adds phone
 ACCOUNT_SIGNUP_FIELDS = ['email*', 'username*', 'password1*', 'password2*']
+SESSION_ENGINE = "django.contrib.sessions.backends.db"
+SESSION_COOKIE_SECURE = False   
+SESSION_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_NAME = "sessionid"
+CSRF_COOKIE_SECURE = False
+CSRF_COOKIE_SAMESITE = "Lax"
+
+# Presence/Online status settings
+PRESENCE_ONLINE_WINDOW_SECONDS = 120  #2 minutes
+
+#
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+SMART_REPLIES_MODEL = "gpt-4o-mini"

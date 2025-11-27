@@ -2,23 +2,17 @@ package com.example.cnnct.homepage.view
 
 import android.content.Intent
 import android.util.Log
-import android.widget.Toast
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Archive
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Chat
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -38,16 +32,14 @@ import com.example.cnnct.calls.view.IncomingCallScreen
 import com.example.cnnct.chat.view.ChatActivity
 import com.example.cnnct.homepage.controller.HomePController
 import com.example.cnnct.homepage.model.ChatSummary
-import com.example.cnnct.notifications.MuteStore
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldPath
-import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
-import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.example.cnnct.calls.view.CallsActivity
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,122 +60,13 @@ fun HomeScreen(callsController: CallsController, onLogout: () -> Unit) {
     var onlineMap by remember { mutableStateOf<Map<String, Long?>>(emptyMap()) }
     var presenceRegs by remember { mutableStateOf<List<ListenerRegistration>>(emptyList()) }
 
-    // my block list (uids)
-    var blockedPeers by remember { mutableStateOf<Set<String>>(emptySet()) }
-
     val scope = rememberCoroutineScope()
     val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
 
     val incomingCall by callsController.incomingCall.collectAsState()
 
-    // 🔔 MuteStore lifecycle + recomposition bridge
-    var muteVersion by remember { mutableStateOf(0) }
-
-    DisposableEffect(currentUserId) {
-        if (currentUserId.isBlank()) return@DisposableEffect onDispose { }
-
-        // start mute sync
-        MuteStore.start()
-        val listener: () -> Unit = { muteVersion++ }   // keeps list reacting to mute changes
-        MuteStore.addListener(listener)
-
-        onDispose {
-            MuteStore.removeListener(listener)
-        }
-    }
-
-    // ===== Selection state =====
-    var selectionMode by remember { mutableStateOf(false) }
-    val selectedIds = remember { mutableStateListOf<String>() }
-    fun toggleSelect(id: String) {
-        if (selectedIds.contains(id)) selectedIds.remove(id) else selectedIds.add(id)
-        if (selectedIds.isEmpty()) selectionMode = false
-    }
-    fun clearSelection() {
-        selectedIds.clear()
-        selectionMode = false
-    }
-
-    // Helpers
-    fun peerOf(chat: ChatSummary): String? =
-        if (chat.type == "private") chat.members.firstOrNull { it != currentUserId } else null
-
-    // Mirror block flags to chat.memberMeta so the OTHER device can see they're blocked
-    suspend fun updateChatBlockFlags(chatId: String, me: String, peer: String, blocked: Boolean) {
-        try {
-            db.collection("chats").document(chatId).set(
-                mapOf(
-                    "memberMeta" to mapOf(
-                        me to mapOf("iBlockedPeer" to blocked),
-                        peer to mapOf("blockedByOther" to blocked)
-                    ),
-                    "updatedAt" to FieldValue.serverTimestamp()
-                ),
-                SetOptions.merge()
-            ).await()
-        } catch (e: Exception) {
-            Log.w("HomeScreen", "updateChatBlockFlags failed", e)
-        }
-    }
-
-    // ===== Confirmation dialog state for block/unblock =====
-    var showBlockDialog by remember { mutableStateOf(false) }
-    var pendingBlockPeerId by remember { mutableStateOf<String?>(null) }
-    var pendingBlockChatId by remember { mutableStateOf<String?>(null) }
-    var isPendingBlock by remember { mutableStateOf(false) }
-
-    // ===== Confirmation dialog state for delete-for-me =====
-    var showDeleteDialog by remember { mutableStateOf(false) }
-
-    // ===== Confirmation dialog for archive =====
-    var showArchiveDialog by remember { mutableStateOf(false) }
-
-    // Block / Unblock Firestore writes
-    fun blockPeer(chatId: String, peerId: String) {
-        db.collection("users").document(currentUserId)
-            .collection("blocks").document(peerId)
-            .set(mapOf("blocked" to true, "createdAt" to FieldValue.serverTimestamp()))
-            .addOnSuccessListener {
-                scope.launch { updateChatBlockFlags(chatId, currentUserId, peerId, true) }
-                Toast.makeText(context, "Blocked", Toast.LENGTH_SHORT).show()
-            }
-            .addOnFailureListener { e ->
-                Log.e("HomeScreen", "blockPeer failed", e)
-                Toast.makeText(context, "Block failed", Toast.LENGTH_SHORT).show()
-            }
-    }
-
-    fun unblockPeer(chatId: String, peerId: String) {
-        db.collection("users").document(currentUserId)
-            .collection("blocks").document(peerId)
-            .delete()
-            .addOnSuccessListener {
-                scope.launch { updateChatBlockFlags(chatId, currentUserId, peerId, false) }
-                Toast.makeText(context, "Unblocked", Toast.LENGTH_SHORT).show()
-            }
-            .addOnFailureListener { e ->
-                Log.e("HomeScreen", "unblockPeer failed", e)
-                Toast.makeText(context, "Unblock failed", Toast.LENGTH_SHORT).show()
-            }
-    }
-
-    // ===== Watch my block list =====
-    DisposableEffect(currentUserId) {
-        if (currentUserId.isBlank()) return@DisposableEffect onDispose {}
-        val reg = db.collection("users").document(currentUserId)
-            .collection("blocks")
-            .addSnapshotListener { snap, err ->
-                if (err != null || snap == null) return@addSnapshotListener
-                blockedPeers = snap.documents
-                    .filter { it.getBoolean("blocked") == true }
-                    .map { it.id }
-                    .toSet()
-            }
-        onDispose { reg.remove() }
-    }
-
-    // ===== Incoming call handling =====
+    // ====== Incoming call surfacing (inline + activity) ======
     LaunchedEffect(incomingCall) {
         incomingCall?.let { call ->
             val myUid = FirebaseAuth.getInstance().currentUser?.uid
@@ -219,18 +102,16 @@ fun HomeScreen(callsController: CallsController, onLogout: () -> Unit) {
         }
     }
 
-    // ===== Listen to /chats =====
+    // ====== Real-time: listen directly to /chats ======
     DisposableEffect(currentUserId) {
         if (currentUserId.isBlank()) return@DisposableEffect onDispose {}
         val reg = HomePController.listenMyChats { joined ->
             chatSummaries = joined
-            selectedIds.removeAll { id -> joined.none { it.id == id } }
-            if (selectedIds.isEmpty()) selectionMode = false
         }
         onDispose { reg?.remove() }
     }
 
-    // ===== Names/photos/phones + presence =====
+    // ====== Real-time users (names/photos/phones + presence) ======
     LaunchedEffect(chatSummaries) {
         val targets = chatSummaries
             .flatMap { it.members + (it.lastMessageSenderId ?: "") }
@@ -260,7 +141,7 @@ fun HomeScreen(callsController: CallsController, onLogout: () -> Unit) {
         userPhotoMap = photoMap
         userPhoneMap = phoneMap
 
-        // presence listeners
+        // Presence listeners
         presenceRegs.forEach { it.remove() }
         presenceRegs = emptyList()
         val regs = mutableListOf<ListenerRegistration>()
@@ -282,7 +163,7 @@ fun HomeScreen(callsController: CallsController, onLogout: () -> Unit) {
         presenceRegs = regs
     }
 
-    // ===== Delivery polling =====
+    // ====== Delivery polling ======
     val pollSeconds = remember { 25 }
     LaunchedEffect(pollSeconds, currentUserId) {
         if (currentUserId.isBlank()) return@LaunchedEffect
@@ -296,7 +177,7 @@ fun HomeScreen(callsController: CallsController, onLogout: () -> Unit) {
         }
     }
 
-    // ===== Search users =====
+    // ====== Search users (for + button) with debounce ======
     LaunchedEffect(searchQuery, showUserPicker) {
         if (!showUserPicker) return@LaunchedEffect
         val q = searchQuery.trim()
@@ -310,178 +191,54 @@ fun HomeScreen(callsController: CallsController, onLogout: () -> Unit) {
         }
     }
 
-    // 🔵 Unread chats count for bottom badge: last msg from other && not read && has timestamp
-    val unreadChatsCount by remember(chatSummaries, currentUserId) {
-        mutableStateOf(
-            chatSummaries.count {
-                it.lastMessageTimestamp != null &&
-                        it.lastMessageSenderId != null &&
-                        it.lastMessageSenderId != currentUserId &&
-                        !it.lastMessageIsRead
-            }
-        )
-    }
-
-    // ===== UI =====
+    // ====== UI ======
     Scaffold(
         topBar = {
-            if (selectionMode) {
-                TopAppBar(
-                    navigationIcon = {
-                        IconButton(onClick = { clearSelection() }) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Close selection")
-                        }
-                    },
-                    title = { Text("${selectedIds.size} selected") },
-                    actions = {
-                        val selectedCount = selectedIds.size
-
-                        // --- MUTE with options (1 hour, 12 hours, forever) ---
-                        var muteMenu by remember { mutableStateOf(false) }
+            TopAppBar(
+                title = {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Image(painterResource(R.drawable.logo2), null, Modifier.height(40.dp))
+                        var expanded by remember { mutableStateOf(false) }
                         Box {
-                            IconButton(onClick = { muteMenu = true }) {
-                                Icon(Icons.Default.NotificationsOff, contentDescription = "Mute")
+                            IconButton(onClick = { expanded = true }) {
+                                Icon(Icons.Default.MoreVert, null)
                             }
-                            DropdownMenu(expanded = muteMenu, onDismissRequest = { muteMenu = false }) {
-
-                                fun applyMuteFor(hours: Long?) {
-                                    scope.launch {
-                                        val now = System.currentTimeMillis()
-                                        selectedIds.toList().forEach { chatId ->
-                                            when (hours) {
-                                                null -> {
-                                                    // Forever = year 2100 sentinel
-                                                    val farFuture = java.util.GregorianCalendar(2100, 0, 1, 0, 0, 0).timeInMillis
-                                                    MuteStore.prime(chatId, farFuture) // local instant
-                                                    HomePController.muteChatForever(currentUserId, chatId)
-                                                }
-                                                0L -> {
-                                                    MuteStore.clearLocal(chatId)
-                                                    HomePController.unmuteChat(currentUserId, chatId)
-                                                }
-                                                else -> {
-                                                    val until = now + hours * 60L * 60L * 1000L
-                                                    MuteStore.prime(chatId, until)
-                                                    HomePController.muteChatForHours(currentUserId, chatId, hours)
-                                                }
-                                            }
-                                        }
-                                        Toast.makeText(context, "Mute updated", Toast.LENGTH_SHORT).show()
-                                        clearSelection()
+                            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("Settings") },
+                                    onClick = {
+                                        expanded = false
+                                        context.startActivity(
+                                            Intent(context, com.example.cnnct.settings.view.SettingsActivity::class.java)
+                                        )
                                     }
-                                    muteMenu = false
-                                }
-
-                                DropdownMenuItem(
-                                    text = { Text("Mute for 1 hour") },
-                                    onClick = { applyMuteFor(1L) }
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("Mute for 12 hours") },
-                                    onClick = { applyMuteFor(12L) }
+                                    text = { Text("Logout") },
+                                    onClick = { expanded = false; onLogout() }
                                 )
-                                DropdownMenuItem(
-                                    text = { Text("Mute forever") },
-                                    onClick = { applyMuteFor(null) } // null => forever
-                                )
-                                Divider()
-                                DropdownMenuItem(
-                                    text = { Text("Unmute") },
-                                    onClick = { applyMuteFor(0L) }
-                                )
-                            }
-                        }
-
-                        // 🗃️ ARCHIVE with confirmation
-                        IconButton(onClick = { showArchiveDialog = true }) {
-                            Icon(Icons.Default.Archive, contentDescription = "Archive")
-                        }
-
-                        // 🔴 DELETE with confirmation dialog (client-side delete-for-me)
-                        IconButton(onClick = { showDeleteDialog = true }) {
-                            Icon(Icons.Default.Delete, contentDescription = "Delete")
-                        }
-
-                        // Block/Unblock only when exactly one chat is selected and it's private
-                        if (selectedCount == 1) {
-                            val selectedChat = chatSummaries.firstOrNull { it.id == selectedIds.first() }
-                            val peerId = selectedChat?.let { peerOf(it) }
-                            val isBlocked = peerId != null && blockedPeers.contains(peerId)
-                            if (peerId != null && selectedChat != null) {
-                                IconButton(onClick = {
-                                    // Open confirm dialog
-                                    pendingBlockPeerId = peerId
-                                    pendingBlockChatId = selectedChat.id
-                                    isPendingBlock = !isBlocked
-                                    showBlockDialog = true
-                                }) {
-                                    Icon(
-                                        Icons.Default.Block,
-                                        contentDescription = if (isBlocked) "Unblock" else "Block"
-                                    )
-                                }
                             }
                         }
                     }
-                )
-            } else {
-                TopAppBar(
-                    title = {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Image(painterResource(R.drawable.logo2), null, Modifier.height(40.dp))
-                            var expanded by remember { mutableStateOf(false) }
-                            Box {
-                                IconButton(onClick = { expanded = true }) {
-                                    Icon(Icons.Default.MoreVert, null)
-                                }
-                                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                                    DropdownMenuItem(
-                                        text = { Text("Archived") },
-                                        onClick = {
-                                            expanded = false
-                                            context.startActivity(
-                                                Intent(context, com.example.cnnct.settings.view.ArchiveSettingsActivity::class.java)
-                                            )
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Settings") },
-                                        onClick = {
-                                            expanded = false
-                                            context.startActivity(
-                                                Intent(context, com.example.cnnct.settings.view.SettingsActivity::class.java)
-                                            )
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Logout") },
-                                        onClick = { expanded = false; onLogout() }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                )
-            }
+                }
+            )
         },
         floatingActionButton = {
-            if (!selectionMode) {
-                FloatingActionButton(
-                    onClick = {
-                        showUserPicker = true
-                        scope.launch {
-                            delay(50)
-                            keyboardController?.show()
-                        }
+            FloatingActionButton(
+                onClick = {
+                    showUserPicker = true
+                    scope.launch {
+                        delay(50)
+                        keyboardController?.show()
                     }
-                ) { Icon(Icons.Default.Add, contentDescription = "New chat") }
-            }
+                }
+            ) { Icon(Icons.Default.Add, contentDescription = "New chat") }
         },
-        bottomBar = { if (!selectionMode) BottomNavigationBar(currentScreen = "chats", unreadChatsCount = unreadChatsCount) }
+        bottomBar = { BottomNavigationBar(currentScreen = "chats") }
     ) { innerPadding ->
         Column(modifier = Modifier.padding(innerPadding)) {
             OutlinedTextField(
@@ -512,23 +269,17 @@ fun HomeScreen(callsController: CallsController, onLogout: () -> Unit) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .combinedClickable(
-                                        onClick = {
-                                            val me = FirebaseAuth.getInstance().currentUser!!.uid
-                                            HomePController.createOrOpenPrivate(me = me, other = uid) { chatId ->
-                                                if (chatId != null) {
-                                                    showUserPicker = false
-                                                    searchQuery = ""
-                                                    val intent = Intent(context, ChatActivity::class.java)
-                                                        .putExtra("chatId", chatId)
-                                                    context.startActivity(intent)
-                                                } else {
-                                                    Toast.makeText(context, "Couldn’t start chat (permissions/index).", Toast.LENGTH_SHORT).show()
-                                                }
+                                    .clickable {
+                                        HomePController.createOrGetPrivateChat(uid) { chatId ->
+                                            if (chatId != null) {
+                                                showUserPicker = false
+                                                searchQuery = ""
+                                                val intent = Intent(context, ChatActivity::class.java)
+                                                    .putExtra("chatId", chatId)
+                                                context.startActivity(intent)
                                             }
-                                        },
-                                        onLongClick = {}
-                                    )
+                                        }
+                                    }
                                     .padding(horizontal = 16.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -554,7 +305,6 @@ fun HomeScreen(callsController: CallsController, onLogout: () -> Unit) {
                 Divider(thickness = 1.dp)
             }
 
-            // Chat list
             ChatListView(
                 chatSummaries = chatSummaries,
                 searchQuery = searchQuery,
@@ -563,137 +313,9 @@ fun HomeScreen(callsController: CallsController, onLogout: () -> Unit) {
                 userPhoneMap = userPhoneMap,
                 onlineMap = onlineMap,
                 currentUserId = currentUserId,
-                selectionMode = selectionMode,
-                isSelected = { id -> selectedIds.contains(id) },
-                onLongPress = { id ->
-                    if (!selectionMode) selectionMode = true
-                    toggleSelect(id)
-                },
-                onOpen = { chatId ->
-                    if (selectionMode) {
-                        toggleSelect(chatId)
-                    } else {
-                        val intent = Intent(context, ChatActivity::class.java).putExtra("chatId", chatId)
-                        context.startActivity(intent)
-                    }
-                },
-                blockedPeers = blockedPeers,
-                // this lambda lets rows render a mute badge and will recompose when muteVersion changes
-                isMuted = { chatId -> muteVersion /* read to subscribe */; MuteStore.isMuted(chatId) }
+                context = context
             )
         }
-    }
-
-    // 🧱 Confirm Block / Unblock
-    if (showBlockDialog) {
-        AlertDialog(
-            onDismissRequest = { showBlockDialog = false },
-            title = {
-                Text(if (isPendingBlock) "Block this user?" else "Unblock this user?")
-            },
-            text = {
-                Text(
-                    if (isPendingBlock)
-                        "They won’t be able to message or call you."
-                    else
-                        "You will be able to message this user again."
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val chatId = pendingBlockChatId ?: return@TextButton
-                    val peerId = pendingBlockPeerId ?: return@TextButton
-                    if (isPendingBlock) blockPeer(chatId, peerId) else unblockPeer(chatId, peerId)
-                    showBlockDialog = false
-                    // keep or clear selection; UX: clear
-                    clearSelection()
-                }) {
-                    Text(if (isPendingBlock) "Block" else "Unblock")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showBlockDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-
-    // 🗑️ Confirm Delete (client-side "delete for me")
-    if (showDeleteDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            title = { Text("Delete chat?") },
-            text = { Text("This hides the chat for you and clears the preview. Others still keep the chat.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDeleteDialog = false
-                        // apply delete-for-me on all selected chats
-                        val ids = selectedIds.toList()
-                        scope.launch {
-                            var ok = 0
-                            ids.forEach { chatId ->
-                                try {
-                                    HomePController.deleteChatForMe(currentUserId, chatId)
-                                    ok++
-                                } catch (e: Exception) {
-                                    Log.e("HomeScreen", "deleteChatForMe failed for $chatId", e)
-                                }
-                            }
-                            if (ok > 0) {
-                                Toast.makeText(context, "Deleted $ok chat(s)", Toast.LENGTH_SHORT).show()
-                            }
-                            clearSelection()
-                        }
-                    }
-                ) { Text("Delete") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") }
-            }
-        )
-    }
-
-    // 🗃️ Confirm Archive
-    if (showArchiveDialog) {
-        AlertDialog(
-            onDismissRequest = { showArchiveDialog = false },
-            title = { Text("Archive chats?") },
-            text = { Text("Chats will move to Archived and disappear from your home list.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showArchiveDialog = false
-                        val ids = selectedIds.toList()
-                        scope.launch {
-                            var ok = 0
-                            val farFuture = java.util.GregorianCalendar(2100, 0, 1, 0, 0, 0).timeInMillis
-
-                            ids.forEach { chatId ->
-                                try {
-                                    // 🔊 local instant effect
-                                    MuteStore.prime(chatId, farFuture)
-
-                                    // server-side: archive + mutedUntil in one write
-                                    HomePController.setArchived(currentUserId, chatId, archived = true)
-                                    ok++
-                                } catch (e: Exception) {
-                                    Log.e("HomeScreen", "archive failed for $chatId", e)
-                                }
-                            }
-                            if (ok > 0) Toast.makeText(context, "Archived $ok chat(s)", Toast.LENGTH_SHORT).show()
-                            clearSelection()
-                        }
-
-
-                    }
-                ) { Text("Archive") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showArchiveDialog = false }) { Text("Cancel") }
-            }
-        )
     }
 }
 
@@ -706,12 +328,7 @@ fun ChatListView(
     userPhoneMap: Map<String, String>,
     onlineMap: Map<String, Long?>,
     currentUserId: String,
-    selectionMode: Boolean,
-    isSelected: (String) -> Boolean,
-    onLongPress: (String) -> Unit,
-    onOpen: (String) -> Unit,
-    blockedPeers: Set<String>,
-    isMuted: (String) -> Boolean
+    context: android.content.Context
 ) {
     val filtered = chatSummaries.filter { chat ->
         if (searchQuery.isBlank()) true else {
@@ -728,47 +345,32 @@ fun ChatListView(
     }
 
     if (filtered.isEmpty()) {
-        Box(Modifier.fillMaxSize(), Alignment.Center) { Text("No chats found") }
+        Box(Modifier.fillMaxSize(), Alignment.Center) {
+            Text("No chats found")
+        }
     } else {
         LazyColumn {
             items(filtered, key = { it.id }) { chat ->
-                val other = if (chat.type == "private") chat.members.firstOrNull { it != currentUserId } else null
-
-                // choose the correct photo URL to pass down
-                val photoUrlForRow: String? = when (chat.type) {
-                    "private" -> other?.let { userPhotoMap[it] }
-                    "group" -> chat.groupPhotoUrl
+                val photoUrlForRow = when (chat.type) {
+                    "private" -> {
+                        val other = chat.members.firstOrNull { it != currentUserId }
+                        userPhotoMap[other]
+                    }
+                    "group" -> null
                     else -> null
                 }
-
-                // blocked indicator logic
-                val blockedForMe = (other != null && blockedPeers.contains(other)) ||
-                        (chat.iBlockedPeer == true) ||
-                        (chat.blockedByOther == true)
-                val blockedSetForRow = if (other != null && blockedForMe) setOf(other) else emptySet()
-
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .combinedClickable(
-                            onClick = { onOpen(chat.id) },
-                            onLongClick = { onLongPress(chat.id) }
-                        )
-                        .padding(vertical = 2.dp)
-                ) {
-                    ChatListItem(
-                        chatSummary = chat,
-                        currentUserId = currentUserId,
-                        userMap = userMap,
-                        onClick = null,
-                        onlineMap = onlineMap,
-                        blockedUserIds = blockedSetForRow,
-                        photoUrl = photoUrlForRow,      // use groupPhotoUrl when group
-                        selectionMode = selectionMode,
-                        selected = isSelected(chat.id),
-                        muted = isMuted(chat.id)
-                    )
-                }
+                ChatListItem(
+                    chatSummary = chat,
+                    currentUserId = currentUserId,
+                    userMap = userMap,
+                    onClick = {
+                        val intent = Intent(context, ChatActivity::class.java).putExtra("chatId", chat.id)
+                        context.startActivity(intent)
+                    },
+                    onlineMap = onlineMap,
+                    blockedUserIds = emptySet(),
+                    photoUrl = photoUrlForRow
+                )
             }
         }
     }
@@ -776,42 +378,52 @@ fun ChatListView(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BottomNavigationBar(currentScreen: String = "chats", unreadChatsCount: Int = 0) {
+fun BottomNavigationBar(currentScreen: String = "chats") {
     val context = LocalContext.current
+
     NavigationBar {
         NavigationBarItem(
-            icon = {
-                BadgedBox(
-                    badge = {
-                        if (unreadChatsCount > 0) {
-                            Badge { Text(unreadChatsCount.toString()) }
-                        }
-                    }
-                ) {
-                    Icon(Icons.Default.Chat, contentDescription = "Chats")
-                }
-            },
+            icon = { Icon(Icons.Default.Chat, contentDescription = "Chats") },
             label = { Text("Chats") },
             selected = currentScreen == "chats",
-            onClick = { if (currentScreen != "chats") context.startActivity(Intent(context, HomeActivity::class.java)) }
+            onClick = {
+                if (currentScreen != "chats") {
+                    context.startActivity(Intent(context, HomeActivity::class.java))
+                }
+            }
         )
+
         NavigationBarItem(
             icon = { Icon(Icons.Default.Group, contentDescription = "Groups") },
             label = { Text("Groups") },
             selected = currentScreen == "groups",
-            onClick = { if (currentScreen != "groups") context.startActivity(Intent(context, com.example.cnnct.groups.view.GroupActivity::class.java)) }
+            onClick = {
+                if (currentScreen != "groups") {
+                    context.startActivity(Intent(context, com.example.cnnct.groups.view.GroupActivity::class.java))
+                }
+            }
         )
+
         NavigationBarItem(
             icon = { Icon(Icons.Default.Call, contentDescription = "Calls") },
             label = { Text("Calls") },
             selected = currentScreen == "calls",
-            onClick = { if (currentScreen != "calls") context.startActivity(Intent(context, com.example.cnnct.calls.view.CallsActivity::class.java)) }
+            onClick = {
+                if (currentScreen != "calls") {
+                    context.startActivity(Intent(context, CallsActivity::class.java))
+                }
+            }
         )
+
         NavigationBarItem(
             icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
             label = { Text("Settings") },
             selected = currentScreen == "settings",
-            onClick = { if (currentScreen != "settings") context.startActivity(Intent(context, com.example.cnnct.settings.view.SettingsActivity::class.java)) }
+            onClick = {
+                if (currentScreen != "settings") {
+                    context.startActivity(Intent(context, com.example.cnnct.settings.view.SettingsActivity::class.java))
+                }
+            }
         )
     }
 }

@@ -1,41 +1,16 @@
-from django.contrib.auth import get_user_model
 from django.contrib.auth.backends import ModelBackend
-from django.db.models import Q
+from django.contrib.auth.models import User
+from a_users.models import Profile
+from firebase_admin import auth as admin_auth
 
-
-def normalize_phone(raw: str) -> str:
-    if not raw:
-        return ''
-    return ''.join(ch for ch in raw if ch.isdigit())
-
-
-class PhoneOrUsernameOrEmailBackend(ModelBackend):
-    """Authenticate with username, email, or profile phone number."""
+class FirebaseBackend(ModelBackend):
     def authenticate(self, request, username=None, password=None, **kwargs):
-        UserModel = get_user_model()
-        login_value = username or kwargs.get('login') or ''
-        if not login_value or not password:
-            return None
-
-        phone = normalize_phone(login_value)
-        user = None
         try:
-            # Try username (case-insensitive)
-            user = UserModel.objects.get(username__iexact=login_value)
-        except UserModel.DoesNotExist:
-            # Try email
-            try:
-                user = UserModel.objects.get(email__iexact=login_value)
-            except UserModel.DoesNotExist:
-                # Try phone on profile
-                if phone:
-                    try:
-                        user = UserModel.objects.get(profile__phone=phone)
-                    except UserModel.DoesNotExist:
-                        user = None
+            # Lookup in Firebase first
+            user_record = admin_auth.get_user_by_email(username)
+            profile = Profile.objects.filter(firebase_uid=user_record.uid).first()
 
-        if user and user.check_password(password):
-            return user
-        return None
-
-
+            if profile:
+                return profile.user
+        except Exception:
+            return None

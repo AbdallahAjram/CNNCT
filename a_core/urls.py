@@ -20,13 +20,21 @@ from django.conf.urls.static import static
 from django.conf import settings
 from a_users.views import profile_view
 from a_home.views import *
+from a_users.views_firebase import firebase_login
+from a_users.views_firebase import whoami
+from a_users.views_firebase import firebase_session_login
+from a_rtchat import views as chat_views
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('accounts/', include('allauth.urls')),
+    path("presence/ping/", chat_views.presence_ping, name="presence-ping"),
     path('', include('a_rtchat.urls')),
     path('profile/', include('a_users.urls')),
+    path("auth/firebase/session-login", firebase_session_login, name="firebase_session_login"),
     path('@<username>/', profile_view, name="profile"),
+    path('login/', firebase_login, name='firebase_login_root'),
+    path("whoami/", whoami, name="whoami"),
 ]
 
 # Only used when DEBUG=True, whitenoise can serve files when DEBUG=False

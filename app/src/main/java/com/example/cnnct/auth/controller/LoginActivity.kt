@@ -15,7 +15,6 @@ import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
-import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 
 private lateinit var auth: FirebaseAuth
@@ -165,6 +164,11 @@ class LoginActivity : ComponentActivity() {
         }
     }
 
+    private fun signInWithGoogle() {
+        val signInIntent = googleSignInClient.signInIntent
+        startActivityForResult(signInIntent, RC_SIGN_IN)
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == RC_SIGN_IN) {
@@ -187,42 +191,27 @@ class LoginActivity : ComponentActivity() {
         val credential = GoogleAuthProvider.getCredential(idToken, null)
         auth.signInWithCredential(credential)
             .addOnCompleteListener(this) { task ->
-                if (!task.isSuccessful) {
-                    Toast.makeText(this,
-                        "Google sign-in failed: ${task.exception?.localizedMessage}",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                    return@addOnCompleteListener
-                }
-                val user = auth.currentUser ?: return@addOnCompleteListener
-                val userRef = FirebaseFirestore.getInstance()
-                    .collection("users").document(user.uid)
-                userRef.get().addOnSuccessListener { doc ->
-                    if (isProfileComplete(doc))
-                        startActivity(Intent(this, HomeActivity::class.java))
-                    else
-                        startActivity(Intent(this, CompleteProfileActivity::class.java))
-                    finish()
+                if (task.isSuccessful) {
+                    val user = auth.currentUser
+                    if (user != null) {
+                        val userRef = FirebaseFirestore.getInstance().collection("users").document(user.uid)
+                        userRef.get().addOnSuccessListener { document ->
+                            val name = document.getString("name")
+                            val displayName = document.getString("displayName")
+
+                            if (!document.exists() || name.isNullOrEmpty() || displayName.isNullOrEmpty()) {
+                                startActivity(Intent(this, CompleteProfileActivity::class.java))
+                            } else {
+                                startActivity(Intent(this, HomeActivity::class.java))
+                            }
+                            finish()
+                        }.addOnFailureListener {
+                            Toast.makeText(this, "Failed to fetch user profile", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                } else {
+                    Toast.makeText(this, "Google sign-in failed: ${task.exception?.message}", Toast.LENGTH_SHORT).show()
                 }
             }
-    }
-
-    private fun isProfileComplete(doc: DocumentSnapshot?): Boolean {
-        if (doc == null || !doc.exists()) return false
-        val name = doc.getString("name")
-        val display = doc.getString("displayName")
-        val phone = doc.getString("phoneNumber")
-        return !name.isNullOrBlank() && !display.isNullOrBlank() && !phone.isNullOrBlank()
-    }
-
-
-    private fun signInWithGoogle() {
-        // always show account picker
-        googleSignInClient.signOut().addOnCompleteListener {
-            googleSignInClient.revokeAccess().addOnCompleteListener {
-                val intent = googleSignInClient.signInIntent
-                startActivityForResult(intent, RC_SIGN_IN)
-            }
-        }
     }
 }

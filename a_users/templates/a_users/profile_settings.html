@@ -5,71 +5,58 @@
 <h1 class="mb-6 text-2xl font-semibold">Account Settings</h1>
 
 <div class="space-y-6">
-    <div class="p-4 rounded-xl border border-gray-200 bg-white">
-        <div class="flex items-center justify-between">
-            <div>
-                <div class="text-sm text-gray-500">Email address</div>
-                <div id="email-address" class="text-gray-900">
-                    {% if user.email %}{{ user.email }}{% else %}No Email{% endif %}
-                </div>
-                <div class="text-xs mt-1">
-                    {% if user.emailaddress_set.first.verified %}
-                        <span class="text-green-600">Verified</span>
-                    {% else %}
-                        <span class="text-amber-600">Not verified</span>
-                    {% endif %}
-                </div>
-            </div>
-            <a id="email-edit" class="px-3 py-1.5 rounded-md bg-gray-100 text-gray-800 hover:bg-gray-200 cursor-pointer"
-                hx-get="{% url 'profile-emailchange' %}"
-                hx-target="#email-address"
-                hx-swap="innerHTML">
-                Edit
-            </a>
-        </div>
-        {% if not user.emailaddress_set.first.verified %}
-        <div class="mt-3">
-            <a href="{% url 'profile-emailverify' %}" class="text-indigo-600 hover:text-indigo-500 text-sm">Verify email</a>
-        </div>
-        {% endif %}
-    </div>
 
-    <div class="p-4 rounded-xl border border-gray-200 bg-white">
-        <div class="flex items-center justify-between">
-            <div>
-                <div class="text-sm text-gray-500">Username</div>
-                <div id="username" class="text-gray-900">{{ user.username }}</div>
-            </div>
-            <a id="username-edit" class="px-3 py-1.5 rounded-md bg-gray-100 text-gray-800 hover:bg-gray-200 cursor-pointer"
-                hx-get="{% url 'profile-usernamechange' %}"
-                hx-target="#username"
-                hx-swap="innerHTML">
-                Edit
-            </a>
+  <!-- Email (display only, always marked Verified) -->
+  <div class="p-4 rounded-xl border border-gray-200 bg-white">
+    <div class="flex items-center justify-between">
+      <div>
+        <div class="text-sm text-gray-500">Email address</div>
+        <div id="email-address" class="text-gray-900">
+          {% if user.email %}{{ user.email }}{% else %}No Email{% endif %}
         </div>
+        <div class="text-xs mt-1">
+          <span class="text-green-600">Verified</span>
+        </div>
+      </div>
     </div>
+  </div>
 
-    <div class="p-4 rounded-xl border border-gray-200 bg-white">
-        <div class="flex items-center justify-between mb-3">
-            <div>
-                <div class="text-sm text-gray-500">Blocked Users</div>
-                <div class="text-gray-800 text-sm">Manage users you have blocked</div>
-            </div>
+  <!-- Display name (from Profile.display_name; fallback to username) -->
+  <div class="p-4 rounded-xl border border-gray-200 bg-white">
+    <div class="flex items-center justify-between">
+      <div>
+        <div class="text-sm text-gray-500">Display name</div>
+        <div id="display-name" class="text-gray-900">
+          {{ user.profile.display_name|default:user.username }}
         </div>
-        <div id="blocked-list">
-            {% include 'a_users/partials/blocked_list.html' %}
-        </div>
+      </div>
     </div>
+  </div>
 
-    <div class="p-4 rounded-xl border border-red-200 bg-red-50">
-        <div class="flex items-center justify-between">
-            <div>
-                <div class="text-sm text-red-700">Delete Account</div>
-                <div class="text-red-800 text-sm">Once deleted, account is gone. Forever.</div>
-            </div>
-            <a href="{% url 'profile-delete' %}" class="px-3 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-500">Delete</a>
-        </div>
+  <!-- Blocked users (unchanged) -->
+  <div class="p-4 rounded-xl border border-gray-200 bg-white">
+    <div class="flex items-center justify-between mb-3">
+      <div>
+        <div class="text-sm text-gray-500">Blocked Users</div>
+        <div class="text-gray-800 text-sm">Manage users you have blocked</div>
+      </div>
     </div>
+    <div id="blocked-list">
+      {% include 'a_users/partials/blocked_list.html' %}
+    </div>
+  </div>
+
+  <!-- Delete account (unchanged) -->
+  <div class="p-4 rounded-xl border border-red-200 bg-red-50">
+    <div class="flex items-center justify-between">
+      <div>
+        <div class="text-sm text-red-700">Delete Account</div>
+        <div class="text-red-800 text-sm">Once deleted, account is gone. Forever.</div>
+      </div>
+      <a href="{% url 'profile-delete' %}" class="px-3 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-500">Delete</a>
+    </div>
+  </div>
+
 </div>
 
 {% endblock %}

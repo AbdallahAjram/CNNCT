@@ -4,20 +4,22 @@
 
     <!-- You don't need WRITE_EXTERNAL_STORAGE for the Photo Picker, but keeping your original line.
          Note: maxSdkVersion=28 means it won't be requested on newer devices anyway. -->
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
-    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" android:required="false" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" android:required="false"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
 
     <application
         android:name=".App"
@@ -31,7 +33,7 @@
         android:theme="@style/Theme.CNNCT"
         tools:targetApi="31">
 
-        <!-- FileProvider for sharing temporary files -->
+        <!-- FileProvider for sharing temporary files (e.g., if you ever need it) -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -41,22 +43,20 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
-
-        <!-- The ONLY Firebase Messaging service that handles pushes -->
         <service
             android:name=".calls.PushService"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+                <action android:name="com.google.firebase.MESSAGING_EVENT"/>
             </intent-filter>
         </service>
-
         <activity
             android:name=".calls.CallActionActivity"
             android:exported="false"
             android:theme="@style/Theme.Transparent" />
 
-        <!-- Launcher -->
+        <!-- Splash/MainActivity: it extends AppCompatActivity, so give it an AppCompat theme.
+             This fixes: "You need to use a Theme.AppCompat theme (or descendant) with this activity." -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -105,10 +105,10 @@
 
         <activity
             android:name=".notifications.view.NotificationSettingsActivity"
-            android:exported="false" />
+            android:exported="false"/>
 
-
-        <!-- CanHub Cropper: needs an ActionBar -->
+        <!-- CanHub Cropper: MUST have an ActionBar to display Back/Done.
+             Use a built-in DarkActionBar theme so buttons appear immediately. -->
         <activity
             android:name="com.canhub.cropper.CropImageActivity"
             android:theme="@style/Theme.MaterialComponents.DayNight.DarkActionBar"
@@ -122,16 +122,9 @@
             android:turnScreenOn="true"
             android:launchMode="singleTop"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
+        <activity android:name=".calls.InCallActivity"
+                  android:exported="false"
+            android:launchMode="singleTop"/>
 
-        <activity
-            android:name=".calls.InCallActivity"
-            android:exported="false"
-            android:launchMode="singleTop" />
-
-        <activity android:name=".chat.view.PersonInfoActivity" android:exported="false"  android:launchMode="singleTop"/>
-        <activity android:name=".chat.view.GroupInfoActivity" android:exported="false"  android:launchMode="singleTop"/>
-        <activity android:name=".settings.view.ArchiveSettingsActivity" android:exported="false"/>
-        <activity android:name=".settings.view.PrivacySettingsActivity" android:exported="false"/>
-        <activity android:name=".settings.view.BlockedSettingsActivity" android:exported="false"/>
     </application>
 </manifest>

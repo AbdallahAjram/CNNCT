@@ -1,0 +1,32 @@
+{% load static %}
+{% static 'images/avatar.svg' as default_avatar %}
+
+{% if results %}
+<ul class="divide-y divide-gray-800">
+  {% for u in results %}
+  <li class="flex items-center gap-3 px-3 py-2">
+    <input type="checkbox"
+           class="shrink-0 accent-indigo-600"
+           data-user-id="{{ u.id }}"
+           data-username="{{ u.username }}"
+           data-name="{{ u.profile.display_name|default:u.username }}"
+           onclick="togglePick(this)">
+    <img class="w-8 h-8 rounded-full object-cover"
+         src="{% firstof u.profile.avatar default_avatar %}"
+         alt="{{ u.profile.display_name|default:u.username }}"
+         onerror="this.onerror=null;this.src='{{ default_avatar }}'">
+    <div class="min-w-0">
+      <div class="text-gray-100 text-sm truncate">{{ u.profile.display_name|default:u.username }}</div>
+      <div class="text-gray-400 text-xs truncate">{{ u.username }}</div>
+      {% if u.profile.phone_number %}
+      <div class="text-gray-500 text-[11px] truncate">{{ u.profile.phone_number }}</div>
+      {% endif %}
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<div class="text-sm text-gray-400 px-3 py-4">
+  No results{% if query %} for “{{ query }}”{% endif %}.
+</div>
+{% endif %}

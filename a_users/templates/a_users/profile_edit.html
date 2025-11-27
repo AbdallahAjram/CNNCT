@@ -11,7 +11,7 @@
 <div class="text-center flex flex-col items-center">
     <img id="avatar" class="w-36 h-36 rounded-full object-cover my-4" src="{{ user.profile.avatar }}" />
     <div class="text-center max-w-md">
-        <h1 id="displayname">{{ user.profile.displayname|default:"" }}</h1>
+        <h1 id="displayname">{{ user.profile.display_name|default:"" }}</h1>
         <div class="text-gray-400 mb-2 -mt-3">@{{ user.username }}</div>
     </div>
 </div>
@@ -45,7 +45,7 @@
     });
 
     // This updates the name
-    const display_nameInput = document.getElementById('id_displayname');
+    const display_nameInput = document.getElementById('id_display_name');
     const display_nameOutput = document.getElementById('displayname');
 
     display_nameInput.addEventListener('input', (event) => {

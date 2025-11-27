@@ -1,0 +1,92 @@
+{% load static %}
+<div id="newchat-backdrop" class="fixed inset-0 bg-black/60 hidden z-40"></div>
+<div id="newchat-modal" class="fixed inset-x-0 top-16 mx-auto w-full max-w-lg bg-[#0f172a] border border-gray-800 rounded-2xl shadow-2xl hidden z-50">
+  <div class="p-3 border-b border-gray-800 flex items-center gap-2">
+    <button id="btn-tab-direct" class="px-3 py-1.5 rounded-lg text-sm bg-indigo-600 text-white" onclick="switchNewChatMode('direct')">Direct</button>
+    <button id="btn-tab-group" class="px-3 py-1.5 rounded-lg text-sm bg-gray-800 text-gray-100" onclick="switchNewChatMode('group')">Group</button>
+    <button class="ml-auto text-gray-400 hover:text-gray-200" onclick="closeNewChat()">&times;</button>
+  </div>
+
+  <!-- Direct tab -->
+  <div id="mode-direct" class="p-3">
+    <div class="relative">
+      <input id="newchat-input"
+             name="q"
+             autocomplete="off"
+             placeholder="Search people to DM"
+             class="w-full rounded-xl pl-10 pr-4 py-2 bg-gray-800 text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+             hx-get="{% url 'chat_user_search' %}"
+             hx-trigger="keyup changed delay:250ms"
+             hx-target="#direct-user-results"
+             hx-swap="innerHTML">
+      <svg viewBox="0 0 24 24" class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" fill="currentColor" aria-hidden="true">
+        <path d="M10 4a6 6 0 104.472 10.034l3.747 3.747a1 1 0 001.415-1.415l-3.747-3.747A6 6 0 0010 4zm-4 6a4 4 0 118 0 4 4 0 01-8 0z"/>
+      </svg>
+    </div>
+    <div id="direct-user-results" class="mt-2 bg-gray-900 rounded-lg overflow-hidden border border-gray-800">
+      <div class="text-gray-400 text-sm p-3">Start typing to find people…</div>
+    </div>
+  </div>
+
+  <!-- Group tab -->
+  <div id="mode-group" class="hidden"
+       hx-get="{% url 'group_create_inline' %}"
+       hx-trigger="load"
+       hx-target="#mode-group"
+       hx-swap="innerHTML">
+    <div class="p-3 text-gray-400">Loading group creator…</div>
+  </div>
+</div>
+
+<script>
+  function switchNewChatMode(mode){
+    const d = document.getElementById('mode-direct');
+    const g = document.getElementById('mode-group');
+    const bd = document.getElementById('btn-tab-direct');
+    const bg = document.getElementById('btn-tab-group');
+    const on = 'px-3 py-1.5 rounded-lg text-sm bg-indigo-600 text-white';
+    const off = 'px-3 py-1.5 rounded-lg text-sm bg-gray-800 text-gray-100';
+    if(mode === 'group'){
+      d?.classList.add('hidden');
+      g?.classList.remove('hidden');
+      if (bd) bd.className = off;
+      if (bg) bg.className = on;
+      if (window.htmx){ htmx.process(g); }
+    } else {
+      g?.classList.add('hidden');
+      d?.classList.remove('hidden');
+      if (bg) bg.className = off;
+      if (bd) bd.className = on;
+      setTimeout(()=>document.getElementById('newchat-input')?.focus(), 0);
+    }
+  }
+  function openNewChat(){
+    document.getElementById('newchat-backdrop')?.classList.remove('hidden');
+    const m = document.getElementById('newchat-modal');
+    if(m){ m.classList.remove('hidden'); switchNewChatMode('direct'); }
+  }
+  function openNewGroup(){
+    document.getElementById('newchat-backdrop')?.classList.remove('hidden');
+    const m = document.getElementById('newchat-modal');
+    if(m){ m.classList.remove('hidden'); switchNewChatMode('group'); }
+  }
+  function closeNewChat(){
+    document.getElementById('newchat-backdrop')?.classList.add('hidden');
+    document.getElementById('newchat-modal')?.classList.add('hidden');
+  }
+
+  document.addEventListener('click', function(e){
+    const container = document.getElementById('direct-user-results');
+    if (!container || !container.contains(e.target)) return;
+    const li = e.target.closest('li[data-username]');
+    if(!li) return;
+    const username = li.getAttribute('data-username');
+    if(!username) return;
+    window.location.href = `/chat/${encodeURIComponent(username)}/`;
+  });
+
+  window.openNewChat = openNewChat;
+  window.openNewGroup = openNewGroup;
+  window.closeNewChat = closeNewChat;
+  window.switchNewChatMode = switchNewChatMode;
+</script>

@@ -1,11 +1,6 @@
 package com.cnnct.chat.mvc.view
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Place // ⬅️ NEW
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -13,60 +8,37 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 fun AttachChooserDialog(
-    onPickMedia: () -> Unit,               // MULTIPLE media
-    onPickDocument: () -> Unit,            // MULTIPLE docs
-    onPickMultipleMedia: () -> Unit,       // kept
-    onPickMultipleDocuments: () -> Unit,   // kept
-    onSendLocation: () -> Unit,            // ⬅️ NEW
+    onPickMedia: () -> Unit,
+    onPickDocument: () -> Unit,
+    onPickMultipleMedia: () -> Unit,
+    onPickMultipleDocuments: () -> Unit,
     onDismiss: () -> Unit
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {},
-        dismissButton = {},
         title = { Text("Attach") },
         text = {
-            Column(Modifier.fillMaxWidth()) {
-                ListItem(
-                    headlineContent = { Text("Photo or Video (Gallery)") },
-                    leadingContent = { Icon(imageVector = Icons.Default.Image, contentDescription = null) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            onPickMultipleMedia()
-                            onDismiss()
-                        }
-                )
-                Divider()
-
-                ListItem(
-                    headlineContent = { Text("Document (PDF / Word / Excel)") },
-                    leadingContent = { Icon(imageVector = Icons.Default.AttachFile, contentDescription = null) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            onPickMultipleDocuments()
-                            onDismiss()
-                        }
-                )
-                Divider()
-
-                // ⬇️ NEW row
-                ListItem(
-                    headlineContent = { Text("Send my location") },
-                    leadingContent = { Icon(imageVector = Icons.Default.Place, contentDescription = null) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            onSendLocation()
-                            onDismiss()
-                        }
-                )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { onPickMedia(); onDismiss() }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Photo or Video (Gallery)")
+                }
+                TextButton(onClick = { onPickMultipleMedia(); onDismiss() }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Photos/Videos — multiple")
+                }
+                TextButton(onClick = { onPickDocument(); onDismiss() }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Document (PDF / Word / Excel)")
+                }
+                TextButton(onClick = { onPickMultipleDocuments(); onDismiss() }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Documents — multiple")
+                }
+                TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                    Text("Cancel")
+                }
             }
         }
     )
 }
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditMessageDialog(

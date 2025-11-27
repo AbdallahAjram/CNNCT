@@ -7,16 +7,20 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
-import androidx.lifecycle.lifecycleScope
 import com.example.cnnct.homepage.view.BottomNavigationBar
 import com.example.cnnct.settings.controller.AccountController
 import com.example.cnnct.settings.model.AccountRepository
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
-import kotlinx.coroutines.launch
-
+import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.FileProvider
+import java.io.File
 class AccountActivity : ComponentActivity() {
     private val repo by lazy {
         AccountRepository(
@@ -32,21 +36,21 @@ class AccountActivity : ComponentActivity() {
         setContent {
             val snackbarHostState = remember { SnackbarHostState() }
 
-            // Initial profile fetch
-            LaunchedEffect(Unit) {
-                lifecycleScope.launch { controller.refreshProfile() }
-            }
-
+            // ✅ Single Scaffold handles BOTH top bar & bottom bar
             Scaffold(
                 topBar = {
                     CenterAlignedTopAppBar(
-                        title = { Text("Profile") },
+                        title = {
+                            Text("Profile")
+                        },
                         navigationIcon = {
                             IconButton(onClick = { finish() }) {
                                 Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                             }
                         },
-                        actions = { Icon(Icons.Default.Person, contentDescription = "Profile Icon") }
+                        actions = {
+                            Icon(Icons.Default.Person, contentDescription = "Profile Icon")
+                        }
                     )
                 },
                 bottomBar = { BottomNavigationBar(currentScreen = "settings") },

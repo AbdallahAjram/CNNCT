@@ -1,21 +1,25 @@
 {% load static %}
+{% static 'images/avatar.svg' as default_avatar %}
+
 {% if results %}
 <ul class="divide-y divide-gray-800">
-    {% for u in results %}
-    <li data-username="{{ u.username }}" class="flex items-center gap-3 px-3 py-3 hover:bg-gray-800 cursor-pointer">
-        <img class="w-9 h-9 rounded-full object-cover" src="{{ u.profile.avatar }}" alt="{{ u.username }}" onerror="this.src='{% static 'images/avatar.svg' %}'">
-        <div class="min-w-0">
-            <div class="text-gray-100 font-medium truncate">{{ u.profile.name|default:u.username }}</div>
-            <div class="text-gray-400 text-xs truncate">@{{ u.username }}</div>
-            {% if u.profile.phone %}
-            <div class="text-gray-500 text-xs truncate">{{ u.profile.phone }}</div>
-            {% endif %}
-        </div>
-    </li>
-    {% endfor %}
-    </ul>
+  {% for u in results %}
+  <li data-username="{{ u.username }}" class="flex items-center gap-3 px-3 py-3 hover:bg-gray-800 cursor-pointer">
+    <img
+      class="w-9 h-9 rounded-full object-cover"
+      src="{{ u.profile.avatar|default:default_avatar }}"
+      alt="{{ u.username }}"
+      onerror="this.onerror=null;this.src='{{ default_avatar }}'">
+    <div class="min-w-0">
+      <div class="text-gray-100 font-medium truncate">{{ u.profile.name|default:u.username }}</div>
+      <div class="text-gray-400 text-xs truncate">{{ u.username }}</div>
+      {% if u.profile.phone_number %}
+      <div class="text-gray-500 text-xs truncate">{{ u.profile.phone_number }}</div>
+      {% endif %}
+    </div>
+  </li>
+  {% endfor %}
+</ul>
 {% else %}
 <div class="text-sm text-gray-400 px-3 py-4">No user found with that username or phone number.</div>
 {% endif %}
-
-

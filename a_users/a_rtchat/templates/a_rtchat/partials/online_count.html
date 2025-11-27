@@ -1,0 +1,29 @@
+<span id="online-count" hx-swap-oob="outerHTML" class="fade-in-scale pr-1">
+    {{ online_count }}
+    <style>
+        @keyframes fadeInScale {
+            from {opacity: 0; transform: scale(2.5);}
+            to { opacity: 1; transform: scale(1);}
+        }
+        .fade-in-scale {
+            animation: fadeInScale 0.3s ease;
+        }
+    </style>
+</span>
+<script hx-swap-oob="true">
+(function(){
+  try{
+    const dot = document.getElementById('header-online-dot');
+    if(!dot) return;
+    const countEl = document.getElementById('online-count');
+    const count = parseInt(countEl && countEl.textContent ? countEl.textContent.trim() : '0', 10);
+    if (count >= 1) {
+      dot.classList.remove('bg-gray-500');
+      dot.classList.add('bg-emerald-500');
+    } else {
+      dot.classList.remove('bg-emerald-500');
+      dot.classList.add('bg-gray-500');
+    }
+  }catch(e){}
+})();
+</script>

@@ -1,0 +1,88 @@
+{% load static %}
+<aside class="w-[360px] min-w-[320px] max-w-[420px] h-[calc(100vh-56px)] bg-[#0f172a] border-r border-gray-800 flex flex-col">
+    <div class="p-3">
+        <div class="flex items-center gap-2">
+            <div class="relative w-full">
+                <input id="chat-search" type="text" placeholder="Search chats" class="w-full rounded-xl pl-10 pr-4 py-2 bg-gray-800 text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500" oninput="filterChats(this.value)" autocomplete="off">
+                <svg viewBox="0 0 24 24" class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" fill="currentColor" aria-hidden="true"><path d="M10 4a6 6 0 104.472 10.034l3.747 3.747a1 1 0 001.415-1.415l-3.747-3.747A6 6 0 0010 4zm-4 6a4 4 0 118 0 4 4 0 01-8 0z"/></svg>
+            </div>
+            <button type="button" class="shrink-0 px-3 py-2 rounded-xl bg-indigo-600 text-white text-sm hover:bg-indigo-500" onclick="openNewChat()">New Chat</button>
+        </div>
+    </div>
+    <style>
+        #chat-search{
+            background-color: #0f172a;
+            color: #e5e7eb !important; 
+            padding-left: 2.5rem !important; 
+        }
+        #chat-search::placeholder{ color:#9ca3af !important; /* gray-400 */ }
+    </style>
+    <div class="px-3 pb-2 text-xs uppercase tracking-wider text-gray-400">Chats</div>
+    <ul id="chat-list" class="overflow-y-auto flex-1 px-2" style="scrollbar-gutter: stable both-edges;">
+        {% if not sidebar_chats %}
+        <li class="px-3 py-8 text-center text-gray-400">
+            <div class="text-sm">No conversations yet. Start a new chat to begin.</div>
+        </li>
+        {% endif %}
+        {% for item in sidebar_chats %}
+            {% if item.kind == 'group' %}
+                {% with cg=item.group %}
+                <li data-name="{{ cg.groupchat_name|lower }}">
+                    <a href="{% url 'chatroom' cg.group_name %}" class="flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-gray-800 {% if chat_group and chat_group.group_name == cg.group_name %}bg-gray-800{% endif %}">
+                        <img class="w-10 h-10 rounded-full object-cover" src="{% firstof cg.avatar '/static/images/avatar.svg' %}" alt="Group" onerror="this.src=`{% static 'images/avatar.svg' %}`">
+                        <div class="min-w-0">
+                            <div class="text-gray-100 font-semibold truncate">{{ cg.groupchat_name }}</div>
+                            <div class="text-gray-400 text-xs truncate">Group chat</div>
+                        </div>
+                        {% if item.unread %}
+                        <div class="ml-auto">
+                            <span class="inline-flex items-center justify-center min-w-[22px] h-6 px-2 rounded-full bg-indigo-600 text-white text-xs font-semibold">{{ item.unread }}</span>
+                        </div>
+                        {% endif %}
+                    </a>
+                </li>
+                {% endwith %}
+            {% else %}
+                {% with cg=item.group m=item.other %}
+                <li data-name="{{ m.profile.name|default:m.username|lower }}">
+                    <a href="{% url 'chatroom' cg.group_name %}" class="flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-gray-800 {% if chat_group and chat_group.group_name == cg.group_name %}bg-gray-800{% endif %}">
+                        <img class="w-10 h-10 rounded-full object-cover" src="{{ m.profile.avatar }}" alt="{{ m.username }}">
+                        <div class="min-w-0">
+                            <div class="text-gray-100 font-semibold truncate">{{ m.profile.name|default:m.username }}</div>
+                            <div class="text-gray-400 text-xs truncate">@{{ m.username }}</div>
+                        </div>
+                        {% if item.unread %}
+                        <div class="ml-auto">
+                            <span class="inline-flex items-center justify-center min-w-[22px] h-6 px-2 rounded-full bg-indigo-600 text-white text-xs font-semibold">{{ item.unread }}</span>
+                        </div>
+                        {% endif %}
+                        {% if item.is_request %}
+                        <div class="ml-2">
+                            <span class="inline-flex items-center justify-center px-2 h-6 rounded-full bg-amber-600 text-white text-[10px] font-semibold">Request</span>
+                        </div>
+                        {% endif %}
+                    </a>
+                </li>
+                {% endwith %}
+            {% endif %}
+        {% endfor %}
+    </ul>
+    <script>
+        function filterChats(q){
+            const query = (q || '').toLowerCase().trim();
+            const items = document.querySelectorAll('#chat-list > li[data-name]');
+            items.forEach(li => {
+                const name = li.getAttribute('data-name') || '';
+                li.style.display = name.includes(query) ? '' : 'none';
+            });
+        }
+        function openNewChat(){
+            const b = document.getElementById('newchat-backdrop');
+            const m = document.getElementById('newchat-modal');
+            if(b) b.classList.remove('hidden');
+            if(m) m.classList.remove('hidden');
+            setTimeout(()=>document.getElementById('newchat-input')?.focus(), 0);
+        }
+    </script>
+</aside>
+

@@ -56,7 +56,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("com.vanniktech:android-image-cropper:4.6.0")
 
-    implementation("androidx.navigation:navigation-compose:2.7.7")
+
     implementation("io.agora.rtc:full-sdk:4.6.0")
     // Core Moshi runtime
     implementation("com.squareup.moshi:moshi:1.15.2")
@@ -65,7 +65,6 @@ dependencies {
     implementation("com.squareup.moshi:moshi-kotlin:1.15.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1") // or newer
     implementation("io.coil-kt:coil-compose:2.6.0")
-    implementation("com.vanniktech:android-image-cropper:4.5.0")
     implementation("androidx.media3:media3-exoplayer:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
     implementation("androidx.media3:media3-datasource:1.3.1")
@@ -85,9 +84,7 @@ dependencies {
     implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.firebase:firebase-storage-ktx")
     implementation("com.google.firebase:firebase-messaging-ktx")
-    implementation ("com.google.firebase:firebase-functions-ktx")
     testImplementation("junit:junit:4.13.2")
-    implementation("com.google.android.gms:play-services-location:21.3.0")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
 }

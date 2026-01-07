@@ -1,6 +1,6 @@
 // File: app/src/main/java/com/example/cnnct/calls/controller/CallsController.kt
 package com.example.cnnct.calls.controller
-
+import com.example.cnnct.BuildConfig
 import android.content.Context
 import android.content.Intent
 import android.util.Log
@@ -23,7 +23,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.*
 
-private const val AGORA_APP_ID = "3678d2cf11ad47579391de324b308fcd"
 private const val AGORA_TOKEN_URL = "https://get-agora-token-840694397310.europe-west1.run.app"
 
 class CallsController(
@@ -38,12 +37,13 @@ class CallsController(
     private val auth = FirebaseAuth.getInstance()
 
     private var incomingWatcher: ListenerRegistration? = null
+    private var callListener: ListenerRegistration? = null
     private var currentCallId: String? = null
     private var ringTimeoutJob: Job? = null
 
     init {
         Log.d("CallsController", "Init: AgoraManager.init()")
-        AgoraManager.init(context, AGORA_APP_ID)
+        AgoraManager.init(context, BuildConfig.AGORA_APP_ID)
     }
 
     fun startCall(
@@ -68,7 +68,9 @@ class CallsController(
                 context.startActivity(intent)
                 Log.d("CallsController", "startCall(): launched InCallActivity")
 
-                repo.listenToCall(callId) { callDoc ->
+                // FIXED: Store the listener registration to be cleaned up later
+                callListener?.remove()
+                callListener = repo.listenToCall(callId) { callDoc ->
                     Log.d("CallsController", "listenToCall update=${callDoc?.status}")
                     callDoc?.let { handleCallUpdate(it) }
                 }
@@ -167,6 +169,9 @@ class CallsController(
     fun clear() {
         Log.d("CallsController", "clear()")
         stopIncomingWatcher()
+        // FIXED: Remove the call listener when the controller is cleared
+        callListener?.remove()
+        callListener = null
         scope.cancel()
         // Do NOT destroy the Agora engine here. InCallActivity needs it.
         // AgoraManager.destroy() should be called on full app shutdown or logout.
@@ -216,6 +221,9 @@ class CallsController(
                 AgoraManager.leaveChannel()
                 currentCallId = null
                 cancelRingTimeout()
+                // FIXED: Stop listening to this call once it's ended.
+                callListener?.remove()
+                callListener = null
             }
         }
     }

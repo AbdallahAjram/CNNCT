@@ -2,6 +2,7 @@ package com.example.cnnct.auth.controller
 
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -143,7 +144,7 @@ class CompleteProfileActivity : ComponentActivity() {
                             },
                             label = { Text(if (phoneLocked) "Phone (locked)" else "Phone (03-123456)") },
                             singleLine = true,
-                            enabled = !phoneLocked, // 🔒 disable if already set
+                            enabled = !phoneLocked, // disable if already set
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
@@ -187,47 +188,61 @@ class CompleteProfileActivity : ComponentActivity() {
                                 if (!phoneLocked) put("phoneNumber", phoneDigits)
                             }
 
-                            // Atomic transaction: reserve username, (optionally) reserve phone, update user
+                            // Transaction with ALL READS FIRST, then writes
                             firestore.runTransaction { tx ->
-                                // 🔹 Username reservation / validation
+                                // ---------- READS ----------
                                 val usernameSnap = tx.get(usernameRef)
+
+                                val oldUsernameSnap = if (oldUsernameRef != null) {
+                                    tx.get(oldUsernameRef)
+                                } else null
+
+                                val phoneSnap = if (phoneRef != null) {
+                                    tx.get(phoneRef)
+                                } else null
+
+                                // ---------- VALIDATION USING SNAPSHOTS ----------
+
+                                // Username: must be free or owned by this uid
                                 if (usernameSnap.exists()) {
                                     val owner = usernameSnap.getString("uid")
                                     if (owner != uid) {
                                         throw IllegalStateException("DISPLAY_TAKEN")
                                     }
-                                } else {
-                                    // Only create if it doesn't exist
+                                }
+
+                                // Phone: only if phone not locked
+                                if (phoneRef != null && phoneSnap != null && phoneSnap.exists()) {
+                                    val owner = phoneSnap.getString("uid")
+                                    if (owner != uid) {
+                                        throw IllegalStateException("PHONE_TAKEN")
+                                    }
+                                }
+
+                                // ---------- WRITES AFTER ALL READS ----------
+
+                                // Reserve username if it didn't exist
+                                if (!usernameSnap.exists()) {
                                     tx.set(usernameRef, mapOf("uid" to uid))
                                 }
 
-                                // 🔹 If display name changed, remove old username reservation
-                                if (oldUsernameRef != null) {
-                                    val oldSnap = tx.get(oldUsernameRef)
-                                    if (oldSnap.exists()) {
-                                        val owner = oldSnap.getString("uid")
-                                        if (owner == uid) {
-                                            tx.delete(oldUsernameRef)
-                                        }
+                                // Remove previous username reservation if changed
+                                if (oldUsernameRef != null && oldUsernameSnap != null && oldUsernameSnap.exists()) {
+                                    val owner = oldUsernameSnap.getString("uid")
+                                    if (owner == uid) {
+                                        tx.delete(oldUsernameRef)
                                     }
                                 }
 
-                                // 🔹 Phone reservation — only if phone not locked and doc doesn’t exist
-                                if (phoneRef != null) {
-                                    val phoneSnap = tx.get(phoneRef)
-                                    if (phoneSnap.exists()) {
-                                        val owner = phoneSnap.getString("uid")
-                                        if (owner != uid) {
-                                            throw IllegalStateException("PHONE_TAKEN")
-                                        }
-                                    } else {
-                                        val email = auth.currentUser?.email ?: ""
-                                        tx.set(phoneRef, mapOf("uid" to uid, "email" to email))
-                                    }
+                                // Reserve phone if needed (only if doc didn't exist)
+                                if (phoneRef != null && (phoneSnap == null || !phoneSnap.exists())) {
+                                    val email = auth.currentUser?.email ?: ""
+                                    tx.set(phoneRef, mapOf("uid" to uid, "email" to email))
                                 }
 
-                                // 🔹 Merge user profile fields (safe update)
+                                // Merge user profile fields
                                 tx.set(userRef, userPatch, SetOptions.merge())
+
                                 null
                             }.addOnSuccessListener {
                                 toast("Profile updated")
@@ -236,7 +251,10 @@ class CompleteProfileActivity : ComponentActivity() {
                                 when (e.message) {
                                     "DISPLAY_TAKEN" -> toast("Display name already taken.")
                                     "PHONE_TAKEN" -> toast("Phone already registered.")
-                                    else -> toast("Failed to save: ${e.localizedMessage}")
+                                    else -> Log.d(
+                                        "comp_prof",
+                                        "Failed to save: ${e.localizedMessage}"
+                                    )
                                 }
                             }
                         },
@@ -244,6 +262,7 @@ class CompleteProfileActivity : ComponentActivity() {
                     ) {
                         Text("Continue")
                     }
+
                 }
             }
         }

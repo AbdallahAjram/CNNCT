@@ -1,3 +1,12 @@
+import java.util.Properties
+
+// 1. Load local.properties safely
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localProperties.load(localPropertiesFile.inputStream())
+}
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -5,6 +14,7 @@ plugins {
 }
 
 android {
+    // IMPORTANT: Ensure this namespace matches your actual package name!
     namespace = "com.example.cnnct"
     compileSdk = 35
 
@@ -15,6 +25,12 @@ android {
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // 2. Load the property or provide an empty fallback
+        val agoraId = localProperties.getProperty("agora.appId") ?: ""
+
+        // 3. CORRECT KOTLIN DSL SYNTAX: Wrap the value in escaped quotes
+        buildConfigField("String", "AGORA_APP_ID", "\"${localProperties.getProperty("agora.appId") ?: ""}\"")
     }
 
     buildTypes {
@@ -38,6 +54,8 @@ android {
 
     buildFeatures {
         compose = true
+        // 4. ENABLE BUILDCONFIG: This must be true to generate the BuildConfig class
+        buildConfig = true
     }
 
     composeOptions {
@@ -55,22 +73,16 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("com.vanniktech:android-image-cropper:4.6.0")
-
     implementation("androidx.navigation:navigation-compose:2.7.7")
     implementation("io.agora.rtc:full-sdk:4.6.0")
-    // Core Moshi runtime
     implementation("com.squareup.moshi:moshi:1.15.2")
-
-// Kotlin adapter (adds support for data classes, nullability, etc.)
     implementation("com.squareup.moshi:moshi-kotlin:1.15.2")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1") // or newer
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
     implementation("io.coil-kt:coil-compose:2.6.0")
-    implementation("com.vanniktech:android-image-cropper:4.5.0")
     implementation("androidx.media3:media3-exoplayer:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
     implementation("androidx.media3:media3-datasource:1.3.1")
     implementation("androidx.media3:media3-datasource-okhttp:1.3.1")
-    implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("io.coil-kt:coil-video:2.6.0")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")

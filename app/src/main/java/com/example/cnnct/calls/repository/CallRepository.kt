@@ -8,6 +8,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.Query
 import kotlinx.coroutines.tasks.await
 
 class CallRepository(
@@ -138,8 +139,8 @@ class CallRepository(
     /**
      * Listen to changes on a specific call document.
      */
-    fun listenToCall(callId: String, callback: (CallDoc?) -> Unit) {
-        callsCol.document(callId).addSnapshotListener { snap, e ->
+    fun listenToCall(callId: String, callback: (CallDoc?) -> Unit): ListenerRegistration {
+        return callsCol.document(callId).addSnapshotListener { snap, e ->
             if (e != null) {
                 Log.e("CallRepo", "listenToCall ERROR for $callId", e)
                 callback(null)
@@ -155,10 +156,10 @@ class CallRepository(
     /**
      * Fetch a user's call logs in descending order of start time.
      */
-    fun fetchUserCallLogs(uid: String, onUpdate: (List<UserCallLog>) -> Unit) {
-        userCallsRoot.document(uid)
+    fun fetchUserCallLogs(uid: String, onUpdate: (List<UserCallLog>) -> Unit): ListenerRegistration {
+        return userCallsRoot.document(uid)
             .collection("calls")
-            .orderBy("startedAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .orderBy("startedAt", Query.Direction.DESCENDING)
             .addSnapshotListener { snaps, err ->
                 if (err != null) {
                     Log.e("CallRepo", "fetchUserCallLogs ERROR for $uid", err)
@@ -195,7 +196,7 @@ class CallRepository(
         return callsCol
             .whereEqualTo("calleeId", me)
             .whereEqualTo("status", "ringing")
-            .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .orderBy("createdAt", Query.Direction.DESCENDING)
             .limit(1)
             .addSnapshotListener { snap, e ->
                 if (e != null) {

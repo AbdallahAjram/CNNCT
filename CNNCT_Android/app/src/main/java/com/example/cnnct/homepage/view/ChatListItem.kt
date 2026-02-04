@@ -41,19 +41,13 @@ fun ChatListItem(
 ) {
     val chatName = when (chatSummary.type) {
         "group" -> {
-            Log.d("ChatListItem", "Group chat → groupName=${chatSummary.groupName}")
             chatSummary.groupName ?: "Group"
         }
         "private" -> {
             val otherUserId = chatSummary.members.firstOrNull { it != currentUserId }
-            val name = userMap[otherUserId] ?: "Unknown"
-            Log.d("ChatListItem", "Private chat with $otherUserId → name=$name")
-            name
+            userMap[otherUserId] ?: "Unknown"
         }
-        else -> {
-            Log.d("ChatListItem", "Unknown chat type: ${chatSummary.type}")
-            "Chat"
-        }
+        else -> "Chat"
     }
 
     fun presenceFor(uid: String?): Presence {
@@ -119,11 +113,8 @@ fun ChatListItem(
         }
     }
 
-    // 🔵 Unread logic mirrors ticks: last msg from other && not read && timestamp present (not masked)
-    val isUnread = chatSummary.lastMessageTimestamp != null &&
-            chatSummary.lastMessageSenderId != null &&
-            chatSummary.lastMessageSenderId != currentUserId &&
-            !chatSummary.lastMessageIsRead
+    // 🔵 Unread logic: use the count we computed in Repository
+    val isUnread = chatSummary.unreadCount > 0
 
     @Composable
     fun RowContent() {

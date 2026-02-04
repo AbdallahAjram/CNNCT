@@ -6,8 +6,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import com.example.cnnct.notifications.controller.NotificationSettingsRepository
-import com.example.cnnct.notifications.controller.NotificationSettingsViewModel
+import com.example.cnnct.notifications.viewmodel.NotificationSettingsRepository
+import com.example.cnnct.notifications.viewmodel.NotificationSettingsViewModel
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 

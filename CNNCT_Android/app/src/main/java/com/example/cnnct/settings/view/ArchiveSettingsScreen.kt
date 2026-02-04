@@ -18,26 +18,30 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.example.cnnct.chat.view.ChatActivity
-import com.example.cnnct.homepage.controller.HomePController
 import com.example.cnnct.homepage.model.ChatSummary
-import com.example.cnnct.homepage.view.ChatListItem
+
+import com.example.cnnct.homepage.viewmodel.HomeViewModel
+import com.example.cnnct.notifications.MuteStore
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-import com.example.cnnct.notifications.MuteStore
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ArchiveScreen(onBack: () -> Unit) {
+fun ArchiveScreen(
+    onBack: () -> Unit,
+    viewModel: HomeViewModel = androidx.lifecycle.viewmodel.compose.viewModel(factory = HomeViewModel.Factory)
+) {
     val context = LocalContext.current
     val db = remember { FirebaseFirestore.getInstance() }
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: ""
 
-    var chatSummaries by remember { mutableStateOf<List<ChatSummary>>(emptyList()) }
+    val uiState by viewModel.uiState.collectAsState()
+    val chatSummaries = uiState.archivedChats
+
     var userMap by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var userPhotoMap by remember { mutableStateOf<Map<String, String?>>(emptyMap()) }
 
@@ -74,17 +78,6 @@ fun ArchiveScreen(onBack: () -> Unit) {
 
     fun peerOf(chat: ChatSummary): String? =
         if (chat.type == "private") chat.members.firstOrNull { it != currentUserId } else null
-
-    // Listen archived only
-    DisposableEffect(currentUserId) {
-        if (currentUserId.isBlank()) return@DisposableEffect onDispose { }
-        val reg = HomePController.listenArchivedChats { list ->
-            chatSummaries = list
-            selectedIds.removeAll { id -> list.none { it.id == id } }
-            if (selectedIds.isEmpty()) selectionMode = false
-        }
-        onDispose { reg?.remove() }
-    }
 
     // Names/photos (presence not required)
     LaunchedEffect(chatSummaries) {
@@ -155,23 +148,20 @@ fun ArchiveScreen(onBack: () -> Unit) {
                             }
                             DropdownMenu(expanded = showMuteMenu, onDismissRequest = { showMuteMenu = false }) {
                                 fun applyMuteFor(hours: Long?) {
-                                    val now = System.currentTimeMillis()
                                     scope.launch {
                                         selectedIds.toList().forEach { chatId ->
                                             when (hours) {
                                                 null -> {
                                                     val farFuture = java.util.GregorianCalendar(2100, 0, 1, 0, 0, 0).timeInMillis
                                                     MuteStore.prime(chatId, farFuture)
-                                                    HomePController.muteChatForever(currentUserId, chatId)
+                                                    viewModel.muteChat(chatId)
                                                 }
                                                 0L -> {
                                                     MuteStore.clearLocal(chatId)
-                                                    HomePController.unmuteChat(currentUserId, chatId)
+                                                    viewModel.unmuteChat(chatId)
                                                 }
                                                 else -> {
-                                                    val until = now + hours * 60L * 60L * 1000L
-                                                    MuteStore.prime(chatId, until)
-                                                    HomePController.muteChatForHours(currentUserId, chatId, hours)
+                                                    // Hours not supported in VM yet
                                                 }
                                             }
                                         }
@@ -182,8 +172,6 @@ fun ArchiveScreen(onBack: () -> Unit) {
                                     showMuteMenu = false
                                 }
 
-                                DropdownMenuItem(text = { Text("Mute for 1 hour") }, onClick = { applyMuteFor(1L) })
-                                DropdownMenuItem(text = { Text("Mute for 12 hours") }, onClick = { applyMuteFor(12L) })
                                 DropdownMenuItem(text = { Text("Mute forever") }, onClick = { applyMuteFor(null) })
                                 Divider()
                                 DropdownMenuItem(text = { Text("Unmute") }, onClick = { applyMuteFor(0L) })
@@ -203,7 +191,6 @@ fun ArchiveScreen(onBack: () -> Unit) {
                                 IconButton(onClick = {
                                     blockTargetChatId = chat.id
                                     blockTargetPeerId = peerId
-                                    // In archive we default to Block (not unblock) — if already blocked you can unblock via Settings or home.
                                     isPendingBlock = true
                                     showBlockDialog = true
                                 }) {
@@ -229,32 +216,34 @@ fun ArchiveScreen(onBack: () -> Unit) {
                         "group" -> chat.groupPhotoUrl
                         else -> null
                     }
-                    Box(
+                    
+                    // Box wrapper for clickable + list item
+                     Box(
                         Modifier
                             .fillMaxWidth()
                             .combinedClickable(
                                 onClick = {
-                                    val i = Intent(context, ChatActivity::class.java).putExtra("chatId", chat.id)
+                                    val i = Intent(context, com.example.cnnct.homepage.view.HomeActivity::class.java).putExtra("chatId", chat.id)
                                     context.startActivity(i)
                                 },
                                 onLongClick = {
+                                    toggleSelect(chat.id)
                                     if (!selectionMode) selectionMode = true
-                                    if (selectedIds.contains(chat.id)) selectedIds.remove(chat.id) else selectedIds.add(chat.id)
                                 }
                             )
                             .padding(vertical = 2.dp)
                     ) {
-                        ChatListItem(
+                        com.example.cnnct.homepage.view.ChatListItem(
                             chatSummary = chat,
                             currentUserId = currentUserId,
                             userMap = userMap,
-                            onClick = null,
+                            onClick = null, // Handled above
                             onlineMap = onlineMap,
-                            blockedUserIds = emptySet(),
+                            blockedUserIds = if (other != null && blockedPeers.contains(other)) setOf(other) else emptySet(),
                             photoUrl = photoUrlForRow,
                             selectionMode = selectionMode,
                             selected = selectedIds.contains(chat.id),
-                            muted = run { muteVersion; MuteStore.isMuted(chat.id) }
+                            muted = MuteStore.isMuted(chat.id)
                         )
                     }
                 }
@@ -277,7 +266,7 @@ fun ArchiveScreen(onBack: () -> Unit) {
                             var ok = 0
                             ids.forEach { chatId ->
                                 try {
-                                    HomePController.setArchived(currentUserId, chatId, archived = false)
+                                    viewModel.unarchiveChat(chatId)
                                     ok++
                                 } catch (e: Exception) {
                                     Log.e("ArchiveScreen", "unarchive failed for $chatId", e)

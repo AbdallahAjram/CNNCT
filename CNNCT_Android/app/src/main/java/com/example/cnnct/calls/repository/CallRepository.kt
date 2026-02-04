@@ -1,15 +1,28 @@
 package com.example.cnnct.calls.repository
 
 import android.util.Log
+import com.example.cnnct.BuildConfig
 import com.example.cnnct.calls.model.CallDoc
 import com.example.cnnct.calls.model.UserCallLog
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+
+private const val AGORA_TOKEN_URL = "https://get-agora-token-840694397310.europe-west1.run.app"
+
+data class TokenResponse(val token: String?, val channelId: String?, val uid: Int?)
 
 class CallRepository(
     private val db: FirebaseFirestore = FirebaseFirestore.getInstance(),
@@ -21,10 +34,6 @@ class CallRepository(
     private fun currentUid(): String =
         auth.currentUser?.uid ?: throw IllegalStateException("Not signed in")
 
-    /**
-     * Create a call doc with a **client-side timestamp**.
-     * Safer if your Firestore rules require a concrete timestamp for `createdAt`.
-     */
     suspend fun createCall(calleeId: String, channelId: String): String {
         val callId = callsCol.document().id
         val call = CallDoc(
@@ -37,42 +46,12 @@ class CallRepository(
         )
         try {
             callsCol.document(callId).set(call).await()
-            Log.d("CallRepo", "createCall SUCCESS: $callId")
         } catch (e: Exception) {
-            Log.e("CallRepo", "createCall FAILED for $callId", e)
             throw e
         }
         return callId
     }
 
-    /**
-     * Create a call doc with a **server timestamp**.
-     * Requires Firestore rules to allow `FieldValue.serverTimestamp()`.
-     */
-    suspend fun createCallDoc(calleeId: String, channelId: String): String {
-        val callId = db.collection("calls").document().id
-        val callerUid = auth.currentUser?.uid ?: throw IllegalStateException("Not signed in")
-        val call = mapOf(
-            "callId" to callId,
-            "callerId" to callerUid,
-            "calleeId" to calleeId,
-            "channelId" to channelId,
-            "status" to "ringing",
-            "createdAt" to FieldValue.serverTimestamp()
-        )
-        try {
-            db.collection("calls").document(callId).set(call).await()
-            Log.d("CallRepo", "createCallDoc SUCCESS: $callId")
-        } catch (e: Exception) {
-            Log.e("CallRepo", "createCallDoc FAILED for $callId", e)
-            throw e
-        }
-        return callId
-    }
-
-    /**
-     * Update call status and optional metadata.
-     */
     suspend fun updateCallStatus(
         callId: String,
         status: String,
@@ -90,122 +69,198 @@ class CallRepository(
         duration?.let { data["duration"] = it }
         endedReason?.let { data["endedReason"] = it }
 
-        try {
-            callsCol.document(callId).update(data).await()
-            Log.d("CallRepo", "updateCallStatus SUCCESS: $callId -> $status")
-        } catch (e: Exception) {
-            Log.e("CallRepo", "updateCallStatus FAILED for $callId", e)
-            throw e
-        }
+        callsCol.document(callId).update(data).await()
     }
 
-    /**
-     * Write call logs for the **current user only**.
-     * Cloud Functions should be used to write logs for the other peer.
-     */
-    suspend fun writeUserCallLogsForEnd(callId: String, callDoc: CallDoc) {
-        val me = currentUid()
-        val (peerId, direction) = if (me == callDoc.callerId) {
-            callDoc.calleeId to "outgoing"
-        } else {
-            callDoc.callerId to "incoming"
-        }
-
-        val statusForLog = if (callDoc.status == "ended") "completed" else callDoc.status
-
-        val log = UserCallLog(
-            callId = callId,
-            peerId = peerId,
-            direction = direction,
-            status = statusForLog,
-            startedAt = callDoc.startedAt,
-            endedAt = callDoc.endedAt,
-            duration = callDoc.duration
-        )
-
-        try {
-            userCallsRoot.document(me)
-                .collection("calls")
-                .document(callId)
-                .set(log)
-                .await()
-            Log.d("CallRepo", "writeUserCallLogsForEnd SUCCESS: $callId for $me")
-        } catch (e: Exception) {
-            Log.e("CallRepo", "writeUserCallLogsForEnd FAILED for $callId for $me", e)
-            throw e
-        }
-    }
-
-    /**
-     * Listen to changes on a specific call document.
-     */
-    fun listenToCall(callId: String, callback: (CallDoc?) -> Unit): ListenerRegistration {
-        return callsCol.document(callId).addSnapshotListener { snap, e ->
-            if (e != null) {
-                Log.e("CallRepo", "listenToCall ERROR for $callId", e)
-                callback(null)
-                return@addSnapshotListener
-            }
-            if (snap != null && snap.exists()) {
-                val cd = snap.toObject(CallDoc::class.java)
-                callback(cd)
-            } else callback(null)
-        }
-    }
-
-    /**
-     * Fetch a user's call logs in descending order of start time.
-     */
-    fun fetchUserCallLogs(uid: String, onUpdate: (List<UserCallLog>) -> Unit): ListenerRegistration {
-        return userCallsRoot.document(uid)
-            .collection("calls")
-            .orderBy("startedAt", Query.Direction.DESCENDING)
-            .addSnapshotListener { snaps, err ->
-                if (err != null) {
-                    Log.e("CallRepo", "fetchUserCallLogs ERROR for $uid", err)
-                    onUpdate(emptyList())
-                    return@addSnapshotListener
-                }
-                val list = snaps?.documents?.mapNotNull { it.toObject(UserCallLog::class.java) }
-                    ?: emptyList()
-                onUpdate(list)
-            }
-    }
-
-    /**
-     * Get a call doc once.
-     */
     suspend fun getCall(callId: String): CallDoc? {
         return try {
             val snap = callsCol.document(callId).get().await()
             snap?.toObject(CallDoc::class.java)
         } catch (e: Exception) {
-            Log.e("CallRepo", "getCall FAILED for $callId", e)
             null
         }
     }
 
     /**
-     * Watch for incoming ringing calls directed at the current user.
+     * Flow-based listener for a single call doc.
      */
-    fun watchIncomingCallsForMe(onUpdate: (CallDoc?) -> Unit): ListenerRegistration {
-        val me = auth.currentUser?.uid ?: return object : ListenerRegistration {
-            override fun remove() {}
+    fun callFlow(callId: String): Flow<CallDoc?> = callbackFlow {
+        val reg = callsCol.document(callId).addSnapshotListener { snap, e ->
+            if (e != null) {
+                trySend(null)
+                return@addSnapshotListener
+            }
+            if (snap != null && snap.exists()) {
+                trySend(snap.toObject(CallDoc::class.java))
+            } else {
+                trySend(null)
+            }
+        }
+        awaitClose { reg.remove() }
+    }
+
+    /**
+     * Flow-based listener for user call logs.
+     */
+    fun userCallLogsFlow(uid: String): Flow<List<UserCallLog>> = callbackFlow {
+        val reg = userCallsRoot.document(uid)
+            .collection("calls")
+            .orderBy("startedAt", Query.Direction.DESCENDING)
+            .addSnapshotListener { snaps, err ->
+                if (err != null) {
+                    trySend(emptyList())
+                    return@addSnapshotListener
+                }
+                val list = snaps?.documents?.mapNotNull { it.toObject(UserCallLog::class.java) }
+                    ?: emptyList()
+                trySend(list)
+            }
+        awaitClose { reg.remove() }
+    }
+
+    /**
+     * Flow-based listener for incoming ringing calls for ME.
+     */
+    fun incomingCallFlow(): Flow<CallDoc?> = callbackFlow {
+        val me = auth.currentUser?.uid
+        if (me == null) {
+            trySend(null)
+            close()
+            return@callbackFlow
         }
 
-        return callsCol
+        val reg = callsCol
             .whereEqualTo("calleeId", me)
             .whereEqualTo("status", "ringing")
             .orderBy("createdAt", Query.Direction.DESCENDING)
             .limit(1)
             .addSnapshotListener { snap, e ->
                 if (e != null) {
-                    Log.e("CallRepo", "watchIncomingCallsForMe ERROR for $me", e)
-                    onUpdate(null)
+                    trySend(null)
                     return@addSnapshotListener
                 }
                 val doc = snap?.documents?.firstOrNull()?.toObject(CallDoc::class.java)
-                onUpdate(doc)
+                trySend(doc)
             }
+        awaitClose { reg.remove() }
     }
+
+    /**
+     * Complex flow that merges caller and callee logs to mimic CallsScreen behavior.
+     */
+    fun createCallLogsFlow(uid: String): Flow<List<UserCallLog>> = callbackFlow {
+        var callerDocs: List<CallDoc>? = null
+        var calleeDocs: List<CallDoc>? = null
+
+        fun emitCombined() {
+            val all = mutableListOf<UserCallLog>()
+            
+            fun mapToLog(doc: CallDoc): UserCallLog {
+                val outgoing = doc.callerId == uid
+                val peerId = if (outgoing) doc.calleeId else doc.callerId
+                val direction = if (outgoing) "outgoing" else "incoming"
+                
+                // UI Status Mapping
+                val uiStatus = when (doc.status) {
+                    "missed" -> "missed"
+                    "rejected" -> "rejected"
+                    // "ended", "in-progress", "accepted" -> "answered"
+                    else -> if (doc.startedAt != null) "answered" else doc.status
+                }
+                
+                val duration = doc.duration ?: if (doc.startedAt != null && doc.endedAt != null) 
+                    (doc.endedAt.seconds - doc.startedAt.seconds).coerceAtLeast(0) 
+                 else null
+
+                return UserCallLog(
+                    callId = doc.callId,
+                    peerId = peerId,
+                    direction = direction,
+                    status = uiStatus, // Using mapped status or doc status? 
+                                       // CallsScreen mapped it to "answered"/"missed".
+                                       // Let's keep it simple or align with CallsScreen logic.
+                    startedAt = doc.startedAt,
+                    endedAt = doc.endedAt ?: doc.createdAt,
+                    duration = duration
+                )
+            }
+
+            callerDocs?.forEach { all.add(mapToLog(it)) }
+            calleeDocs?.forEach { all.add(mapToLog(it)) }
+
+            val sorted = all.distinctBy { it.callId }
+                .sortedWith(
+                   compareByDescending<UserCallLog> { it.endedAt?.seconds ?: 0L }
+                       .thenByDescending { it.startedAt?.seconds ?: 0L }
+                )
+            
+            trySend(sorted)
+        }
+
+        val r1 = callsCol
+            .whereEqualTo("callerId", uid)
+            .orderBy("createdAt", Query.Direction.DESCENDING)
+            .limit(50)
+            .addSnapshotListener { snap, e ->
+                if (e != null) {
+                    android.util.Log.e("CallRepo", "Caller logs error", e)
+                    return@addSnapshotListener
+                }
+                callerDocs = snap?.toObjects(CallDoc::class.java) ?: emptyList()
+                emitCombined()
+            }
+
+        val r2 = callsCol
+            .whereEqualTo("calleeId", uid)
+            .orderBy("createdAt", Query.Direction.DESCENDING)
+            .limit(50)
+            .addSnapshotListener { snap, e ->
+                if (e != null) {
+                    android.util.Log.e("CallRepo", "Callee logs error", e)
+                    return@addSnapshotListener
+                }
+                calleeDocs = snap?.toObjects(CallDoc::class.java) ?: emptyList()
+                emitCombined()
+            }
+
+        awaitClose { 
+            r1.remove()
+            r2.remove()
+        }
+    }
+
+    /**
+     * Request Agora Token from Cloud Function/Server.
+     */
+    suspend fun requestAgoraToken(channelId: String, uid: Int = 0): TokenResponse =
+        withContext(Dispatchers.IO) {
+            val idToken = auth.currentUser?.getIdToken(true)?.await()?.token
+                ?: throw IllegalStateException("No idToken")
+
+            val jsonPayload = """{"channelId":"$channelId","uidInt":$uid}"""
+            val body = jsonPayload.toRequestBody("application/json".toMediaType())
+            val client = OkHttpClient()
+
+            val request = Request.Builder()
+                .url(AGORA_TOKEN_URL)
+                .post(body)
+                .addHeader("Authorization", "Bearer $idToken")
+                .addHeader("Content-Type", "application/json")
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                val code = response.code
+                val responseBody = response.body?.string()
+
+                if (!response.isSuccessful) throw IllegalStateException("Token request failed: $code $responseBody")
+                if (responseBody.isNullOrEmpty()) throw IllegalStateException("Empty token response")
+
+                val json = org.json.JSONObject(responseBody)
+                return@withContext TokenResponse(
+                    token = json.optString("token"),
+                    channelId = json.optString("channelId"),
+                    uid = json.optInt("uid", 0)
+                )
+            }
+        }
 }

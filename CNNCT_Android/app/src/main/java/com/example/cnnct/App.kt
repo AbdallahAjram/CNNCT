@@ -23,6 +23,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
+import dagger.hilt.android.HiltAndroidApp
+
+@HiltAndroidApp
 class App : Application(), LifecycleEventObserver {
 
     private val appScope = CoroutineScope(Dispatchers.IO + SupervisorJob())

@@ -8,6 +8,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
@@ -29,7 +30,12 @@
         android:roundIcon="@drawable/logo"
         android:supportsRtl="true"
         android:theme="@style/Theme.CNNCT"
+        android:enableOnBackInvokedCallback="true"
         tools:targetApi="31">
+
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-3940256099942544~3347511713"/>
 
         <!-- FileProvider for sharing temporary files -->
         <provider
@@ -50,6 +56,11 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
+
+        <service
+            android:name=".calls.ActiveCallService"
+            android:foregroundServiceType="microphone"
+            android:exported="false" />
 
         <activity
             android:name=".calls.CallActionActivity"
@@ -72,32 +83,12 @@
             android:exported="false" />
 
         <activity
-            android:name=".auth.controller.LoginActivity"
+            android:name=".auth.view.LoginActivity"
             android:exported="false" />
 
-        <activity
-            android:name=".auth.controller.SignupActivity"
-            android:exported="false" />
 
-        <activity
-            android:name=".auth.controller.CompleteProfileActivity"
-            android:exported="false" />
 
-        <activity
-            android:name=".groups.view.GroupActivity"
-            android:exported="false" />
 
-        <activity
-            android:name=".chat.view.ChatActivity"
-            android:exported="false" />
-
-        <activity
-            android:name=".settings.view.SettingsActivity"
-            android:exported="false" />
-
-        <activity
-            android:name=".calls.view.CallsActivity"
-            android:exported="false" />
 
         <activity
             android:name=".settings.view.AccountActivity"
@@ -115,7 +106,7 @@
             tools:replace="android:theme" />
 
         <activity
-            android:name=".calls.IncomingCallActivity"
+            android:name=".calls.view.IncomingCallActivity"
             android:exported="true"
             android:immersive="true"
             android:showOnLockScreen="true"
@@ -124,7 +115,7 @@
             android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
 
         <activity
-            android:name=".calls.InCallActivity"
+            android:name=".calls.view.InCallActivity"
             android:exported="false"
             android:launchMode="singleTop" />
 

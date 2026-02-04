@@ -1,9 +1,12 @@
 package com.example.cnnct.settings.model
 
+import com.google.firebase.firestore.DocumentId
+
 data class UserProfile(
-    val uid: String,
+    @DocumentId
+    val uid: String = "",
     val displayName: String = "",
-    val phone: String? = null,
+    val phoneNumber: String? = null,
     val about: String? = null,
     val photoUrl: String? = null
 ) {

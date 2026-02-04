@@ -30,7 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.cnnct.notifications.NotifPrefs
 import com.example.cnnct.notifications.SettingsCache
-import com.example.cnnct.notifications.controller.NotificationSettingsViewModel
+import com.example.cnnct.notifications.viewmodel.NotificationSettingsViewModel
 import com.example.cnnct.notifications.model.NotificationSettings
 
 

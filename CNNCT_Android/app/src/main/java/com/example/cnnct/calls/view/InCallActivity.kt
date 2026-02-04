@@ -1,5 +1,4 @@
-// app/src/main/java/com/example/cnnct/calls/InCallActivity.kt
-package com.example.cnnct.calls
+package com.example.cnnct.calls.view
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -14,202 +13,145 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.example.cnnct.R
 import com.example.cnnct.agora.AgoraManager
-import com.example.cnnct.calls.controller.CallsController
-import com.example.cnnct.calls.repository.CallRepository
-import com.example.cnnct.calls.view.InCallScreen
-import com.google.firebase.Timestamp
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.storage.FirebaseStorage
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
-import kotlinx.coroutines.withContext
+import androidx.activity.viewModels
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.lifecycleScope
+import com.example.cnnct.calls.ActiveCallService
+import com.example.cnnct.calls.view.InCallScreen
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.storage.FirebaseStorage
+import kotlinx.coroutines.tasks.await
+
+import com.example.cnnct.BuildConfig
 
 class InCallActivity : ComponentActivity() {
-    private lateinit var callsController: CallsController
-    private lateinit var repo: CallRepository
 
-    private var callId: String? = null
-    private var callerId: String? = null
-
-    // UI state observed by Compose
-    private var uiCallerName by mutableStateOf("Unknown")
-    private var uiCallerPhone by mutableStateOf<String?>(null)
-    private var uiCallerPhotoUrl by mutableStateOf<String?>(null)
-    private var uiCallStatus by mutableStateOf("ringing")
+    private val viewModel: com.example.cnnct.calls.viewmodel.InCallViewModel by viewModels {
+        com.example.cnnct.calls.viewmodel.InCallViewModel.Factory
+    }
 
     private var mediaPlayer: MediaPlayer? = null
-    private var joinAttempted = false
-
-    private val REQUEST_CODE_PERMISSIONS = 101
-    private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.RECORD_AUDIO)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        Log.d("InCallActivity", "onCreate()")
+        AgoraManager.init(this, BuildConfig.AGORA_APP_ID) 
 
-        AgoraManager.init(this, "3678d2cf11ad47579391de324b308fcd")
-        callsController = CallsController(this)
-        repo = CallRepository()
-
-        callId = intent.getStringExtra("callId")
-        callerId = intent.getStringExtra("callerId")
-        Log.d("InCallActivity", "extras callId=$callId callerId=$callerId")
-
-        if (!allPermissionsGranted()) {
-            ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS)
-        } else {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             initUiThenBind()
+        } else {
+            if (ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.RECORD_AUDIO)) {
+                android.app.AlertDialog.Builder(this)
+                    .setTitle("Microphone Permission")
+                    .setMessage("This app requires microphone access to make calls. Please grant the permission to proceed.")
+                    .setPositiveButton("OK") { _, _ ->
+                        ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 1001)
+                    }
+                    .setNegativeButton("Cancel") { _, _ -> finish() }
+                    .show()
+            } else {
+                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 1001)
+            }
         }
     }
 
-    private fun allPermissionsGranted() =
-        REQUIRED_PERMISSIONS.all {
-            ContextCompat.checkSelfPermission(baseContext, it) == PackageManager.PERMISSION_GRANTED
-        }
-
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQUEST_CODE_PERMISSIONS) {
-            if (allPermissionsGranted()) initUiThenBind()
-            else {
-                Toast.makeText(this, "Microphone permission required", Toast.LENGTH_SHORT).show()
+        if (requestCode == 1001) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                initUiThenBind()
+            } else {
+                Toast.makeText(this, "Microphone permission required for calls", Toast.LENGTH_SHORT).show()
                 finish()
             }
         }
     }
 
     private fun initUiThenBind() {
-        // Render immediately
+        // Start Foreground Service to keep call alive
+        val callId = intent.getStringExtra("callId") ?: "unknown"
+        val serviceIntent = android.content.Intent(this, ActiveCallService::class.java).apply {
+            putExtra("callId", callId)
+            // Peer name might not be known yet, service defaults to "Connected".
+            // We could update notification later if needed, but for now this ensures background survival.
+            putExtra("peerName", "Caller") 
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
+        }
+
         setContent {
-            InCallScreen(
-                callerName = uiCallerName,
-                callerPhone = uiCallerPhone,
-                callerPhotoUrl = uiCallerPhotoUrl,
-                initialElapsedSeconds = 0L,
-                callStatus = uiCallStatus,
-                onEnd = { endCallAndFinish() },
-                onToggleMute = { muted -> AgoraManager.muteLocalAudio(muted) }
-            )
-        }
-
-        // Resolve call + preload peer profile
-        lifecycleScope.launch {
-            val id = callId ?: return@launch
+            val state by viewModel.uiState.collectAsState()
+            
+            // Side effect: Handle ended/rejected
+            LaunchedEffect(state.callStatus) {
+                Log.d("InCallActivity", "Status changed to ${state.callStatus}")
+                if (state.callStatus in listOf("ended", "rejected", "missed")) {
+                    stopRingbackTone()
+                    // Delay slightly to show "Call Ended" UI?
+                    // Original code didn't delay much.
+                    if (!isFinishing) {
+                         kotlinx.coroutines.delay(1000)
+                         endCallAndFinish()
+                    }
+                }
+            }
+            
+            // Ringback logic
             val myUid = FirebaseAuth.getInstance().currentUser?.uid
-
-            val doc = try {
-                FirebaseFirestore.getInstance().collection("calls").document(id).get().await()
-            } catch (e: Exception) {
-                Log.e("InCallActivity", "Failed to load call doc: ${e.message}")
-                null
-            }
-
-            if (doc != null && doc.exists()) {
-                val docCaller = doc.getString("callerId")
-                val docCallee = doc.getString("calleeId")
-                val status = doc.getString("status") ?: "ringing"
-                uiCallStatus = status
-
-                if (callerId.isNullOrBlank()) callerId = docCaller
-
-                val peerUid = when (myUid) {
-                    docCaller -> docCallee
-                    docCallee -> docCaller
-                    else -> docCallee
-                }
-
-                // Load peer profile (displayName, phoneNumber, photoUrl with storage fallback)
-                peerUid?.let { loadPeerInfoIntoUi(it) }
-
-                // Play ringback only if I am the original caller
-                if (myUid != null && myUid == docCaller && status == "ringing") startRingbackTone()
-            }
-
-            // Start listening for status changes
-            observeCall()
-        }
-    }
-
-    private fun observeCall() {
-        val id = callId ?: return
-        lifecycleScope.launch {
-            repo.listenToCall(id) { callDoc ->
-                if (callDoc == null) return@listenToCall
-                Log.d("InCallActivity", "listenToCall status=${callDoc.status}")
-                uiCallStatus = callDoc.status
-
-                when (callDoc.status) {
-                    "in-progress" -> {
+            LaunchedEffect(state.call) {
+                val call = state.call
+                if (call != null) {
+                    if (call.status == "ringing" && call.callerId == myUid) {
+                        startRingbackTone()
+                    } else {
                         stopRingbackTone()
-                        if (!joinAttempted) {
-                            joinAttempted = true
-                            lifecycleScope.launch {
-                                try {
-                                    val tokenResponse = withContext(Dispatchers.IO) {
-                                        callsController.requestAgoraToken(callDoc.channelId, 0)
-                                    }
-                                    val ready = AgoraManager.waitUntilInitialized(5_000)
-                                    if (ready && !AgoraManager.isJoined()) {
-                                        AgoraManager.joinChannel(
-                                            token = tokenResponse.token,
-                                            channelName = callDoc.channelId,
-                                            uid = tokenResponse.uid ?: 0
-                                        )
-                                    }
-                                } catch (t: Throwable) {
-                                    Log.e("InCallActivity", "joinChannel failed: ${t.message}", t)
-                                }
-                            }
-                        }
                     }
-                    "ended", "rejected", "missed" -> {
-                        stopRingbackTone()
-                        try { AgoraManager.leaveChannel() } catch (_: Throwable) {}
-                        finish()
+                }
+            }
+
+            InCallScreen(
+                callerName = state.peerName,
+                callerPhone = state.peerPhone,
+                callerPhotoUrl = state.peerPhotoUrl,
+                initialElapsedSeconds = 0L,
+                callStatus = state.callStatus,
+                onEnd = { viewModel.endCall() },
+                onToggleMute = { muted -> viewModel.toggleMute(muted) }
+
+            )
+            
+            // Link Service Notification to Peer Name
+            LaunchedEffect(state.peerName) {
+                if (state.peerName != "Unknown") {
+                     val updateIntent = android.content.Intent(this@InCallActivity, ActiveCallService::class.java).apply {
+                        putExtra("callId", callId)
+                        putExtra("peerName", state.peerName)
+                    }
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        startForegroundService(updateIntent)
+                    } else {
+                        startService(updateIntent)
                     }
                 }
             }
         }
     }
-
-    private suspend fun loadPeerInfoIntoUi(uid: String) {
-        try {
-            val db = FirebaseFirestore.getInstance()
-            val userDoc = db.collection("users").document(uid).get().await()
-            uiCallerName = userDoc.getString("displayName")
-                ?: userDoc.getString("name")
-                        ?: "Unknown"
-            uiCallerPhone = userDoc.getString("phoneNumber")
-
-            // Prefer photoUrl from the user doc, fallback to Storage avatar
-            uiCallerPhotoUrl = userDoc.getString("photoUrl") ?: run {
-                try {
-                    FirebaseStorage.getInstance()
-                        .reference
-                        .child("avatars/$uid/avatar.jpg")
-                        .downloadUrl
-                        .await()
-                        .toString()
-                } catch (_: Exception) { null }
-            }
-
-            Log.d("InCallActivity", "Peer loaded name=$uiCallerName phone=$uiCallerPhone photo=$uiCallerPhotoUrl")
-        } catch (e: Exception) {
-            Log.e("InCallActivity", "loadPeerInfoIntoUi failed: ${e.message}")
-            uiCallerName = "Unknown"
-        }
-    }
+    
+    // loadPeerInfoIntoUi REMOVED -> Handled by InCallViewModel
 
     private fun startRingbackTone() {
-        stopRingbackTone()
-        mediaPlayer = MediaPlayer.create(this, R.raw.outgoing)
-        mediaPlayer?.isLooping = true
-        mediaPlayer?.start()
+        if (mediaPlayer == null) {
+            mediaPlayer = MediaPlayer.create(this, R.raw.outgoing)
+            mediaPlayer?.isLooping = true
+            mediaPlayer?.start()
+        }
     }
 
     private fun stopRingbackTone() {
@@ -220,27 +162,20 @@ class InCallActivity : ComponentActivity() {
 
     private fun endCallAndFinish() {
         stopRingbackTone()
-        val id = callId
-        if (id != null) {
-            lifecycleScope.launch {
-                try {
-                    // Mark ended via controller; it also leaves channel
-                    callsController.endCall(id)
-                } catch (_: Exception) {
-                } finally {
-                    try { AgoraManager.leaveChannel() } catch (_: Throwable) {}
-                    finish()
-                }
-            }
-        } else {
-            try { AgoraManager.leaveChannel() } catch (_: Throwable) {}
-            finish()
-        }
+        stopService(android.content.Intent(this, ActiveCallService::class.java))
+        
+        // Activity finish happens. ViewModel handles Agora leave in onCleared.
+        // But we want to ensure we leave channel explicitly if needed before destroy?
+        // VM onCleared handles it.
+        try { AgoraManager.leaveChannel() } catch (_: Throwable) {} // Redundant safety
+        if (!isFinishing) finish() 
     }
 
     override fun onDestroy() {
         super.onDestroy()
         stopRingbackTone()
+        stopService(android.content.Intent(this, ActiveCallService::class.java))
         try { AgoraManager.leaveChannel() } catch (_: Throwable) {}
+        // VM handles logic.
     }
 }

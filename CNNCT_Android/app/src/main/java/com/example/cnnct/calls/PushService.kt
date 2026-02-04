@@ -13,7 +13,8 @@ import coil.ImageLoader
 import coil.request.ImageRequest
 import coil.size.Size
 import com.example.cnnct.R
-import com.example.cnnct.chat.view.ChatActivity
+import com.example.cnnct.calls.view.IncomingCallActivity
+
 import com.example.cnnct.notifications.ForegroundTracker
 import com.example.cnnct.notifications.MuteStore
 import com.example.cnnct.notifications.NotificationHelper
@@ -114,7 +115,7 @@ class PushService : FirebaseMessagingService() {
 
                 val open = android.app.PendingIntent.getActivity(
                     this, chatId.hashCode(),
-                    Intent(this, ChatActivity::class.java)
+                    Intent(this, com.example.cnnct.homepage.view.HomeActivity::class.java)
                         .putExtra("chatId", chatId)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
                     android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE

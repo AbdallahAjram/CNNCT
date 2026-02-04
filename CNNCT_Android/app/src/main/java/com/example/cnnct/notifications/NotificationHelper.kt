@@ -11,7 +11,7 @@ import com.example.cnnct.R
 
 object NotificationHelper {
     const val CHANNEL_MESSAGES = "messages"
-    const val CHANNEL_CALLS = "calls"
+    const val CHANNEL_CALLS = "calls_channel_v2" // Changed to force update on device
 
     fun ensureChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -27,16 +27,36 @@ object NotificationHelper {
         }
         nm.createNotificationChannel(msg)
 
-        // Calls
+        // Calls (Ringing)
         val calls = NotificationChannel(
             CHANNEL_CALLS,
-            "Calls",
+            "Incoming Calls",
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
-            description = "Incoming and ongoing calls"
+            description = "Incoming voice/video calls"
             setShowBadge(true)
+            enableVibration(true)
+            vibrationPattern = longArrayOf(0, 1000, 500, 1000)
+            
+            val soundUri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE)
+            val audioAttributes = android.media.AudioAttributes.Builder()
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                .build()
+            setSound(soundUri, audioAttributes)
         }
         nm.createNotificationChannel(calls)
+
+        // Active Call (Ongoing - Low Importance)
+        val ongoing = NotificationChannel(
+            "ongoing_call",
+            "Active Calls",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "Persistent notification for active calls"
+            setShowBadge(false)
+        }
+        nm.createNotificationChannel(ongoing)
     }
 
     fun cancel(context: Context, id: Int) {

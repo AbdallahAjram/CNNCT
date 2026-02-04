@@ -40,10 +40,12 @@ fun CallRow(
     val arrow = if (isIncoming) Icons.Rounded.SouthWest else Icons.Rounded.NorthEast
 
     // Declined (rejected) now red like missed
+    // Declined (rejected) now red like missed
+    // Incoming "ended" (no start time) means caller hung up -> treat as missed (Red)
     val arrowColor = when {
-        log.status == "missed" || log.status == "rejected" -> Color(0xFFD32F2F) // red
-        isIncoming && log.status == "answered" -> Color(0xFF2E7D32) // green for answered incoming
-        else -> MaterialTheme.colorScheme.primary // outgoing answered or ended
+        log.status == "answered" -> Color(0xFF4CAF50) // Green for connected/answered calls (both directions)
+        isIncoming -> Color(0xFFD32F2F) // Red for all non-answered Incoming (Missed, Rejected, Ended-without-answer)
+        else -> MaterialTheme.colorScheme.primary // Purple for all non-answered Outgoing (Cancelled, No Answer, Rejected)
     }
 
     val ts = (log.endedAt ?: log.startedAt)?.toDate()

@@ -9,33 +9,14 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
-import androidx.lifecycle.lifecycleScope
-import com.example.cnnct.homepage.view.BottomNavigationBar
-import com.example.cnnct.settings.controller.AccountController
-import com.example.cnnct.settings.model.AccountRepository
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
-import kotlinx.coroutines.launch
 
 class AccountActivity : ComponentActivity() {
-    private val repo by lazy {
-        AccountRepository(
-            auth = FirebaseAuth.getInstance(),
-            db = FirebaseFirestore.getInstance()
-        )
-    }
-    private val controller by lazy { AccountController(repo) }
-
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             val snackbarHostState = remember { SnackbarHostState() }
-
-            // Initial profile fetch
-            LaunchedEffect(Unit) {
-                lifecycleScope.launch { controller.refreshProfile() }
-            }
 
             Scaffold(
                 topBar = {
@@ -49,14 +30,19 @@ class AccountActivity : ComponentActivity() {
                         actions = { Icon(Icons.Default.Person, contentDescription = "Profile Icon") }
                     )
                 },
-                bottomBar = { BottomNavigationBar(currentScreen = "settings") },
                 snackbarHost = { SnackbarHost(snackbarHostState) }
             ) { padding ->
-                AccountScreenContent(
-                    contentPadding = padding,
-                    controller = controller,
-                    snackbarHostState = snackbarHostState
-                )
+                AccountScreen(
+                contentPadding = padding,
+                snackbarHostState = snackbarHostState,
+                onLogout = {
+                    // Navigate to Login and clear stack
+                    val intent = android.content.Intent(this, com.example.cnnct.auth.view.LoginActivity::class.java)
+                    intent.flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK
+                    startActivity(intent)
+                    finish()
+                }
+            )
             }
         }
     }

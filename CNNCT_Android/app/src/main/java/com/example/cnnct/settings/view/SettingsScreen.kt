@@ -96,7 +96,7 @@ fun SettingsScreen(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "CNNCT© 2025",
+                    text = "CNNCT© 2026",
                     color = FooterGray,
                     fontSize = 12.sp
                 )

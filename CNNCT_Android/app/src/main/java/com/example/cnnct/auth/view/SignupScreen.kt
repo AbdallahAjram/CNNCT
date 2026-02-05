@@ -11,6 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -18,6 +19,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withStyle
 import com.example.cnnct.R
 
 @Composable
@@ -172,15 +175,73 @@ fun SignupScreen(
                 enabled = !isLoading
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Terms & Privacy
+            var isTermsAccepted by remember { mutableStateOf(false) }
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val termsUrl = "https://abdallahajram.github.io/CNNCT/terms.html"
+            val privacyUrl = "https://abdallahajram.github.io/CNNCT/privacy.html"
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+            ) {
+                Checkbox(
+                    checked = isTermsAccepted,
+                    onCheckedChange = { isTermsAccepted = it },
+                    colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
+                )
+                
+                val annotatedString = androidx.compose.ui.text.buildAnnotatedString {
+                    append("I agree to the ")
+                    pushStringAnnotation(tag = "TERMS", annotation = termsUrl)
+                    withStyle(style = SpanStyle(
+                        color = MaterialTheme.colorScheme.primary,
+                        textDecoration = TextDecoration.Underline
+                    )
+                    ) {
+                        append("Terms of Service")
+                    }
+                    pop()
+                    append(" and ")
+                    pushStringAnnotation(tag = "PRIVACY", annotation = privacyUrl)
+                    withStyle(style = SpanStyle(color = MaterialTheme.colorScheme.primary, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline)) {
+                        append("Privacy Policy")
+                    }
+                    pop()
+                    append(".")
+                }
+
+                androidx.compose.foundation.text.ClickableText(
+                    text = annotatedString,
+                    style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurface),
+                    onClick = { offset ->
+                        annotatedString.getStringAnnotations(tag = "TERMS", start = offset, end = offset).firstOrNull()?.let {
+                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(it.item))
+                            context.startActivity(intent)
+                        }
+                        annotatedString.getStringAnnotations(tag = "PRIVACY", start = offset, end = offset).firstOrNull()?.let {
+                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(it.item))
+                            context.startActivity(intent)
+                        }
+                    }
+                )
+            }
+
+            fun saveTermsAcceptance() {
+                val prefs = context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
+                prefs.edit().putBoolean("hasAcceptedTerms", true).apply()
+            }
 
             Button(
                 onClick = {
+                    saveTermsAcceptance()
                     onSignupClick(
                         name.trim(),
                         displayName.trim(),
                         email.trim(),
-                        phoneDigits, // pass normalized (digits only)
+                        phoneDigits,
                         password,
                         confirmPassword
                     )
@@ -192,7 +253,7 @@ fun SignupScreen(
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary
                 ),
-                enabled = !isLoading
+                enabled = !isLoading && isTermsAccepted
             ) {
                 if (isLoading) {
                     CircularProgressIndicator(
@@ -208,7 +269,10 @@ fun SignupScreen(
             Spacer(modifier = Modifier.height(24.dp))
 
             Button(
-                onClick = onGoogleSignupClick,
+                onClick = {
+                    saveTermsAcceptance()
+                    onGoogleSignupClick()
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp),
@@ -217,7 +281,7 @@ fun SignupScreen(
                     contentColor = MaterialTheme.colorScheme.onSurface
                 ),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                enabled = !isLoading
+                enabled = !isLoading && isTermsAccepted
             ) {
                 Image(
                     painter = painterResource(id = R.drawable.google_round),

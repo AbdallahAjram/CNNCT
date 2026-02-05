@@ -16,7 +16,6 @@ plugins {
 }
 
 android {
-    // IMPORTANT: Ensure this namespace matches your actual package name!
     namespace = "com.example.cnnct"
     compileSdk = 35
 
@@ -28,24 +27,36 @@ android {
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // 2. Load the property or provide an empty fallback
         val agoraId = localProperties.getProperty("agora.appId") ?: ""
+        buildConfigField("String", "AGORA_APP_ID", "\"${agoraId}\"")
+    }
 
-        // 3. CORRECT KOTLIN DSL SYNTAX: Wrap the value in escaped quotes
-        buildConfigField("String", "AGORA_APP_ID", "\"${localProperties.getProperty("agora.appId") ?: ""}\"")
+    // --- FIX STARTS HERE ---
+    // You must define the 'release' configuration before buildTypes tries to use it.
+    signingConfigs {
+        create("release") {
+            // This points to your local debug key so the Gradle Sync works.
+            // When you are ready for the Play Store, update these paths to your CNNCT.jks file.
+            storeFile = file(System.getProperty("user.home") + "/.android/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
-            isShrinkResources = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // signingConfig = signingConfigs.getByName("release") // 👈 Comment this out!
+            // This now correctly references the "release" config created above
+            signingConfig = signingConfigs.getByName("release")
         }
     }
+    // --- FIX ENDS HERE ---
 
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
@@ -59,12 +70,17 @@ android {
 
     buildFeatures {
         compose = true
-        // 4. ENABLE BUILDCONFIG: This must be true to generate the BuildConfig class
         buildConfig = true
     }
 
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.11"
+    }
+
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
     }
 }
 

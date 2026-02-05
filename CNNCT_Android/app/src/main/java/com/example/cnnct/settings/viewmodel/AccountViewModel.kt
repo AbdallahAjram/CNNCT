@@ -10,6 +10,7 @@ import com.example.cnnct.settings.repository.SettingsRepository
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 class AccountViewModel(
     private val repo: SettingsRepository
@@ -50,23 +51,26 @@ class AccountViewModel(
         }
     }
 
-    fun uploadAndSaveAvatar(uri: Uri, onSuccess: () -> Unit, onError: (String) -> Unit) = viewModelScope.launch {
-        try {
-            repo.uploadAndSaveAvatar(uri)
-            repo.refreshProfile()
-            onSuccess()
-        } catch (e: Exception) {
-            onError(e.message ?: "Upload failed")
+    fun uploadAndSaveAvatar(uri: Uri, onSuccess: () -> Unit, onError: (String) -> Unit) =
+        viewModelScope.launch {
+            try {
+                repo.uploadAndSaveAvatar(uri)
+                repo.refreshProfile()
+                onSuccess()
+            } catch (e: Exception) {
+                onError(e.message ?: "Upload failed")
+            }
         }
+
     fun deleteAccount(onSuccess: () -> Unit, onError: (String) -> Unit) = viewModelScope.launch {
         try {
             // 1. Delete DB Data
             repo.deleteUserData()
-            
+
             // 2. Delete Auth User
             val user = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
             user?.delete()?.await()
-            
+
             onSuccess()
         } catch (e: Exception) {
             if (e is com.google.firebase.auth.FirebaseAuthRecentLoginRequiredException) {

@@ -76,21 +76,34 @@ fun AttachmentContent(
 
     val kind = detectAttachmentKind(contentType, fileName ?: message.text)
     val label = fileName ?: (message.text ?: "Attachment")
+    
+    // Check for progress
+    // We import MessageStatus? No, it's in model package. 
+    // Assuming imports are available or I assume Message contains status.
+    // I need to import MessageStatus if not imported.
+    // It is imported in Models.kt package but file doesn't import it relative.
+    // I'll check imports.
+    
+    val progress = if (message.status == com.cnnct.chat.mvc.model.MessageStatus.Sending) message.uploadProgress else null
 
     when (kind) {
         AttachmentKind.Image -> InlineImageBubble(
             url = message.mediaUrl.orEmpty(),
-            enabled = !inSelection,
+            enabled = !inSelection && progress == null,
+            progress = progress,
             onOpen = onOpen
         )
         AttachmentKind.Video -> InlineVideoBubble(
             videoUrl = message.mediaUrl.orEmpty(),
-            enabled = !inSelection,
+            thumbnailUrl = message.thumbnailUrl,
+            enabled = !inSelection && progress == null,
+            progress = progress,
             onOpen = onOpen
         )
         else -> FileRow(
             name = label,
             secondary = sizeBytes?.let { prettyBytes(it) },
+            progress = progress,
             onClick = onOpen
         )
     }
@@ -102,6 +115,7 @@ fun AttachmentContent(
 private fun InlineImageBubble(
     url: String,
     enabled: Boolean,
+    progress: Float? = null,
     cornerRadiusDp: Int = 14,
     onOpen: () -> Unit
 ) {
@@ -119,7 +133,7 @@ private fun InlineImageBubble(
     ) {
         SubcomposeAsyncImage(
             model = ImageRequest.Builder(LocalContext.current)
-                .data(url)
+                .data(url.ifEmpty { null }) // Handle empty URL for pending
                 .crossfade(true)
                 .build(),
             contentDescription = null,
@@ -130,7 +144,10 @@ private fun InlineImageBubble(
                         .matchParentSize()
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center
-                ) { CircularProgressIndicator() }
+                ) { 
+                    // Don't show generic loading if we have specific upload progress
+                    if (progress == null) CircularProgressIndicator() 
+                }
             },
             success = { state ->
                 val dw = state.result.drawable.intrinsicWidth.takeIf { it > 0 } ?: 16
@@ -152,12 +169,30 @@ private fun InlineImageBubble(
                         .height(targetHeight)
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center
-                ) { Text("Failed to load", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                ) { 
+                    if (progress != null) {
+                         // Placeholder for uploading image (maybe implicit from file URI if supported by Coil)
+                         // For now just gray box + progress
+                    } else {
+                        Text("Failed to load", color = MaterialTheme.colorScheme.onSurfaceVariant) 
+                    }
+                }
             },
             modifier = Modifier
                 .width(maxBubbleWidth)
                 .height(targetHeight)
         )
+        
+        if (progress != null) {
+             Box(
+                 modifier = Modifier
+                     .matchParentSize()
+                     .background(Color.Black.copy(alpha = 0.4f)),
+                 contentAlignment = Alignment.Center
+             ) {
+                 CircularProgressIndicator(progress = progress, color = Color.White)
+             }
+        }
     }
 }
 
@@ -166,7 +201,9 @@ private fun InlineImageBubble(
 @Composable
 private fun InlineVideoBubble(
     videoUrl: String,
+    thumbnailUrl: String?,
     enabled: Boolean,
+    progress: Float? = null,
     cornerRadiusDp: Int = 14,
     onOpen: () -> Unit
 ) {
@@ -191,7 +228,7 @@ private fun InlineVideoBubble(
     ) {
         SubcomposeAsyncImage(
             model = ImageRequest.Builder(context)
-                .data(videoUrl)
+                .data(thumbnailUrl ?: videoUrl.ifEmpty { null })
                 .crossfade(true)
                 .build(),
             imageLoader = imageLoader,
@@ -203,7 +240,7 @@ private fun InlineVideoBubble(
                         .matchParentSize()
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center
-                ) { CircularProgressIndicator() }
+                ) { if (progress == null) CircularProgressIndicator() }
             },
             success = { state ->
                 val dw = state.result.drawable.intrinsicWidth.takeIf { it > 0 } ?: 16
@@ -225,22 +262,35 @@ private fun InlineVideoBubble(
                         .height(targetHeight)
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center
-                ) { Text("No preview", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                ) { 
+                    if (progress == null) Text("No preview", color = MaterialTheme.colorScheme.onSurfaceVariant) 
+                }
             },
             modifier = Modifier
                 .width(maxBubbleWidth)
                 .height(targetHeight)
         )
 
-        Box(
-            modifier = Modifier
-                .align(Alignment.Center)
-                .size(52.dp)
-                .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.35f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = Color.White)
+        if (progress != null) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(Color.Black.copy(alpha = 0.4f)),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(progress = progress, color = Color.White)
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(52.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.35f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = Color.White)
+            }
         }
     }
 }
@@ -251,17 +301,26 @@ private fun InlineVideoBubble(
 private fun FileRow(
     name: String,
     secondary: String?,
+    progress: Float? = null,
     onClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .clickable { onClick() }
+            .clickable(enabled = progress == null) { onClick() }
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(imageVector = Icons.Filled.InsertDriveFile, contentDescription = null)
+        if (progress != null) {
+            CircularProgressIndicator(
+                progress = progress, 
+                modifier = Modifier.size(24.dp),
+                strokeWidth = 3.dp
+            )
+        } else {
+            Icon(imageVector = Icons.Filled.InsertDriveFile, contentDescription = null)
+        }
         Spacer(Modifier.width(8.dp))
         Column(Modifier.weight(1f)) {
             Text(
@@ -272,7 +331,7 @@ private fun FileRow(
             )
             if (secondary != null) {
                 Text(
-                    text = secondary,
+                    text = if (progress != null) "Uploading..." else secondary,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

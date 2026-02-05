@@ -147,7 +147,7 @@ fun NotificationSettingsScreen(
                     .padding(bottom = 8.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Text("CNNCT© 2025", color = FooterGray, fontSize = 12.sp)
+                Text("CNNCT© 2026", color = FooterGray, fontSize = 12.sp)
             }
 
         }

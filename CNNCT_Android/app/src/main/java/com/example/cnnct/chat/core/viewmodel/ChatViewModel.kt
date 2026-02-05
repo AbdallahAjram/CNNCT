@@ -26,6 +26,7 @@ import kotlinx.coroutines.launch
 // but an error message (State B) at slightly inconsistent times.
 data class ChatUiState(
     val messages: List<Message> = emptyList(),
+    val pendingMessages: List<Message> = emptyList(), // Local uploading messages
     val sendError: String? = null,
     val memberMeta: Map<String, Any>? = null,
     val iBlockedPeer: Boolean = false
@@ -110,23 +111,76 @@ class ChatViewModel(
         }
     }
 
-    fun sendAttachments(chatId: String, senderId: String, uris: List<Uri>, cr: ContentResolver) {
+    fun sendAttachments(chatId: String, senderId: String, uris: List<Uri>, context: android.content.Context) {
         if (uris.isEmpty()) return
         if (_uiState.value.iBlockedPeer) {
             _uiState.update { it.copy(sendError = "You blocked this user. Unblock to chat.") }
             return
         }
-        
-        // 💡 EXPLANATION:
-        // Dispatchers.IO is optimized for disk/network operations, perfect for file uploads.
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                uris.forEach { uri ->
-                    repo.sendAttachmentMessage(chatId, senderId, uri, cr)
+
+        uris.forEach { uri ->
+            viewModelScope.launch(Dispatchers.IO) {
+                // Create Optimistic Message ID upfront
+                val tempId = java.util.UUID.randomUUID().toString()
+                
+                try {
+                    val cr = context.contentResolver
+                    val type = cr.getType(uri) ?: "application/octet-stream"
+                    val finalUri = if (type.startsWith("image/")) {
+                        try {
+                            val file = com.example.cnnct.chat.core.util.ImageCompressor.compressImage(context, uri)
+                            Uri.fromFile(file)
+                        } catch (e: Exception) {
+                            println("Compression failed, using original: ${e.message}")
+                            uri
+                        }
+                    } else {
+                        uri
+                    }
+
+                    val mType = when {
+                         type.startsWith("image/") -> MessageType.image
+                         type.startsWith("video/") -> MessageType.video
+                         else -> MessageType.file
+                    }
+                    val optimistic = Message(
+                        id = tempId,
+                        senderId = senderId,
+                        type = mType,
+                        text = "Sending...",
+                        status = com.cnnct.chat.mvc.model.MessageStatus.Sending,
+                        uploadProgress = 0f,
+                        createdAtClient = com.google.firebase.Timestamp.now()
+                    )
+                    
+                    _uiState.update { it.copy(pendingMessages = it.pendingMessages + optimistic) }
+
+                    repo.sendAttachmentMessage(chatId, senderId, finalUri, context).collect { status ->
+                         when(status) {
+                             is ChatRepository.UploadStatus.Progress -> {
+                                 updatePendingMessage(tempId) { it.copy(uploadProgress = status.percentage / 100f) }
+                             }
+                             is ChatRepository.UploadStatus.Completed -> {
+                                 // Remove pending, real message will appear from stream
+                                 _uiState.update { it.copy(pendingMessages = it.pendingMessages.filterNot { m -> m.id == tempId }) }
+                             }
+                         }
+                    }
+                } catch (e: Exception) {
+                     _uiState.update { 
+                        it.copy(
+                            sendError = "Attachment failed: ${e.message}",
+                            pendingMessages = it.pendingMessages.filterNot { m -> m.id == tempId }
+                        ) 
+                     }
                 }
-            } catch (e: Exception) {
-                _uiState.update { it.copy(sendError = "Attachment not sent. You may be blocked.") }
             }
+        }
+    }
+
+    private fun updatePendingMessage(id: String, update: (Message) -> Message) {
+        _uiState.update { state ->
+            state.copy(pendingMessages = state.pendingMessages.map { if (it.id == id) update(it) else it })
         }
     }
 

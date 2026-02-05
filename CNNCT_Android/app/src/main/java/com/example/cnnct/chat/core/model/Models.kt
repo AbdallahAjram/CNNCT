@@ -5,12 +5,15 @@ import com.google.firebase.firestore.GeoPoint
 
 enum class MessageType { text, image, video, file, location }
 
+enum class MessageStatus { Sending, Sent, Delivered, Read, Failed }
+
 data class Message(
     val id: String = "",
     val senderId: String = "",
     val type: MessageType = MessageType.text,
     val text: String? = null,
     val mediaUrl: String? = null,
+    val thumbnailUrl: String? = null,
     val location: GeoPoint? = null,
 
     // Attachment metadata
@@ -27,7 +30,11 @@ data class Message(
     // Delete/edit UX
     val hiddenFor: List<String>? = null,  // per-user delete-for-me
     val deletedBy: String? = null,
-    val deletedAt: Timestamp? = null
+    val deletedAt: Timestamp? = null,
+    
+    // Local / UI State
+    val status: MessageStatus = MessageStatus.Sent,
+    val uploadProgress: Float? = null // 0.0 - 1.0
 )
 
 data class ChatInfo(
@@ -58,10 +65,11 @@ data class UserChatMeta(
 data class MessageDraft(
     val type: MessageType = MessageType.text,
     val text: String? = null,             // message text OR filename/caption
-    val mediaUrl: String? = null,         // set for attachments after upload
+    val mediaUrl: String? = null,
+    val thumbnailUrl: String? = null,
     val location: GeoPoint? = null,
 
-    // attachment-only
+    // Attachment metadata
     val contentType: String? = null,
     val fileName: String? = null,
     val sizeBytes: Long? = null

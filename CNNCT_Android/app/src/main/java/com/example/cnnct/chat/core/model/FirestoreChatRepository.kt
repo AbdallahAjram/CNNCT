@@ -1,6 +1,7 @@
 package com.cnnct.chat.mvc.model
 
 import android.content.ContentResolver
+import android.content.Context
 import android.database.Cursor
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -290,13 +291,14 @@ class FirestoreChatRepository(
 
     // ========== attachments ==========
 
-    override suspend fun sendAttachmentMessage(
+    override fun sendAttachmentMessage(
         chatId: String,
         senderId: String,
         localUri: Uri,
-        contentResolver: ContentResolver
-    ) {
+        context: Context
+    ): Flow<ChatRepository.UploadStatus> = callbackFlow {
         // We'll reuse iBlockedPeer() check inside sendMessage (called at the end)
+        val contentResolver = context.contentResolver
         val info = resolveUriInfo(contentResolver, localUri)
         val folder = when {
             info.contentType.startsWith("image/") -> "images"
@@ -306,22 +308,65 @@ class FirestoreChatRepository(
         val cleanName = sanitizeFileName(info.fileName.ifBlank { "file" })
         val path = "chat_uploads/$chatId/$folder/${System.currentTimeMillis()}_$cleanName"
 
+        var thumbUrl: String? = null
+        if (info.contentType.startsWith("video/")) {
+            try {
+                trySend(ChatRepository.UploadStatus.Progress(0.01f)) // Show starting
+                val thumbFile = com.example.cnnct.chat.core.util.VideoThumbnailUtils.generateThumbnail(context, localUri)
+                val thumbUri = Uri.fromFile(thumbFile)
+                val thumbPath = "chat_uploads/$chatId/thumbs/${System.currentTimeMillis()}_thumb.jpg"
+                val thumbRef = storage.reference.child(thumbPath)
+                
+                // Upload thumb (await)
+                thumbRef.putFile(thumbUri).await()
+                thumbUrl = thumbRef.downloadUrl.await().toString()
+            } catch (e: Exception) {
+                // Log but continue without thumbnail
+                println("Failed to generate/upload thumbnail: ${e.message}")
+            }
+        }
+
         val ref = storage.reference.child(path)
         val meta = storageMetadata { contentType = info.contentType.ifBlank { "application/octet-stream" } }
 
-        ref.putFile(localUri, meta).await()
-        val downloadUrl = ref.downloadUrl.await().toString()
+        val uploadTask = ref.putFile(localUri, meta)
+        
+        uploadTask.addOnProgressListener { snap ->
+            val p = if (snap.totalByteCount > 0) {
+                (snap.bytesTransferred.toFloat() / snap.totalByteCount.toFloat())
+            } else 0f
+            trySend(ChatRepository.UploadStatus.Progress(p))
+        }
 
-        val mType = if (info.contentType.startsWith("image/")) MessageType.image else MessageType.file
-        val draft = MessageDraft(
-            type = mType,
-            text = cleanName,                 // show name as caption
-            mediaUrl = downloadUrl,
-            contentType = info.contentType,
-            fileName = cleanName,
-            sizeBytes = info.sizeBytes
-        )
-        sendMessage(chatId, senderId, draft)
+        try {
+            uploadTask.await()
+            val downloadUrl = ref.downloadUrl.await().toString()
+
+            val mType = when {
+                info.contentType.startsWith("image/") -> MessageType.image
+                info.contentType.startsWith("video/") -> MessageType.video
+                else -> MessageType.file
+            }
+            
+            val draft = MessageDraft(
+                type = mType,
+                text = cleanName, 
+                mediaUrl = downloadUrl,
+                thumbnailUrl = thumbUrl,
+                contentType = info.contentType,
+                fileName = cleanName,
+                sizeBytes = info.sizeBytes
+            )
+            sendMessage(chatId, senderId, draft)
+            trySend(ChatRepository.UploadStatus.Completed)
+            close()
+        } catch (e: Exception) {
+            close(e)
+        }
+        
+        awaitClose { 
+            if (uploadTask.isInProgress) uploadTask.cancel() 
+        }
     }
 
     data class UriInfo(
@@ -331,17 +376,29 @@ class FirestoreChatRepository(
     )
 
     private fun resolveUriInfo(cr: ContentResolver, uri: Uri): UriInfo {
+        if (uri.scheme == "file") {
+            val path = uri.path ?: return UriInfo("file", null, "application/octet-stream")
+            val file = java.io.File(path)
+            val name = file.name
+            val size = file.length()
+            val mime = guessMimeFromName(name)
+            return UriInfo(name, size, mime)
+        }
+
         var name = "file"
         var size: Long? = null
-        cr.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)
-            ?.use { c: Cursor ->
-                val nameIdx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                val sizeIdx = c.getColumnIndex(OpenableColumns.SIZE)
-                if (c.moveToFirst()) {
-                    if (nameIdx != -1) name = c.getString(nameIdx) ?: name
-                    if (sizeIdx != -1) size = if (!c.isNull(sizeIdx)) c.getLong(sizeIdx) else null
+        try {
+            cr.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)
+                ?.use { c: Cursor ->
+                    val nameIdx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    val sizeIdx = c.getColumnIndex(OpenableColumns.SIZE)
+                    if (c.moveToFirst()) {
+                        if (nameIdx != -1) name = c.getString(nameIdx) ?: name
+                        if (sizeIdx != -1) size = if (!c.isNull(sizeIdx)) c.getLong(sizeIdx) else null
+                    }
                 }
-            }
+        } catch (_: Exception) {}
+        
         val mime = cr.getType(uri) ?: guessMimeFromName(name)
         return UriInfo(fileName = name, sizeBytes = size, contentType = mime)
     }

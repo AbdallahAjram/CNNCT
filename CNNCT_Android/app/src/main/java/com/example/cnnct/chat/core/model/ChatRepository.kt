@@ -1,6 +1,6 @@
 package com.cnnct.chat.mvc.model
 
-import android.content.ContentResolver
+import android.content.Context
 import android.net.Uri
 import kotlinx.coroutines.flow.Flow
 import com.example.cnnct.homepage.model.ChatSummary
@@ -26,12 +26,17 @@ interface ChatRepository {
 
     suspend fun updateLastOpenedAt(chatId: String, userId: String)
 
-    suspend fun sendAttachmentMessage(
+    fun sendAttachmentMessage(
         chatId: String,
         senderId: String,
         localUri: Uri,
-        contentResolver: ContentResolver
-    )
+        context: Context
+    ): Flow<UploadStatus>
+    
+    sealed class UploadStatus {
+        data class Progress(val percentage: Float): UploadStatus()
+        object Completed: UploadStatus()
+    }
 
     suspend fun editMessage(
         chatId: String,

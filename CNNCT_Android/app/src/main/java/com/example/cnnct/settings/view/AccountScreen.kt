@@ -114,32 +114,7 @@ fun AccountScreen(
         cropLauncher.launch(CropImageContractOptions(uri = pickedUri, cropImageOptions = options))
     }
 
-    var showDeleteDialog by remember { mutableStateOf(false) }
-
-    if (showDeleteDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            title = { Text("Delete Account") },
-            text = { Text("Are you sure you want to delete your account? This action cannot be undone and all your data (chats, profile) will be permanently lost.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDeleteDialog = false
-                        vm.deleteAccount(
-                            onSuccess = onLogout,
-                            onError = { err ->
-                                scope.launch { snackbarHostState.showSnackbar(err) }
-                            }
-                        )
-                    },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) { Text("Delete") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") }
-            }
-        )
-    }
+    // Delete Dialog Removed (Moved to PrivacySettingsScreen)
 
     AccountScreenContent(
         profile = profileState,
@@ -159,7 +134,7 @@ fun AccountScreen(
         onPickPhoto = {
             pickPhotoLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
         },
-        onDeleteAccountClick = { showDeleteDialog = true }
+    // Delete action moved to Privacy
     )
 }
 
@@ -172,7 +147,6 @@ fun AccountScreenContent(
     onUpdateDisplayName: (String) -> Unit,
     onUpdateAbout: (String) -> Unit,
     onPickPhoto: () -> Unit,
-    onDeleteAccountClick: () -> Unit
 ) {
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -328,22 +302,10 @@ fun AccountScreenContent(
 
                 Spacer(Modifier.height(32.dp))
                 
-                // Privacy & Security
-                Column(Modifier.fillMaxWidth()) {
-                     Text("Privacy & Security", color = TextBlack, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                     Spacer(Modifier.height(8.dp))
-                     Button(
-                         onClick = onDeleteAccountClick,
-                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                         modifier = Modifier.fillMaxWidth().height(48.dp),
-                         shape = RoundedCornerShape(12.dp)
-                     ) {
-                         Text("Delete Account", fontWeight = FontWeight.Bold)
-                     }
-                }
+                // Privacy & Security moved to Privacy Screen
 
                 Spacer(Modifier.weight(1f))
-                Text("CNNCT© 2025", color = FooterGray, fontSize = 12.sp)
+                Text("CNNCT© 2026", color = FooterGray, fontSize = 12.sp)
             }
         }
     }

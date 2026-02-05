@@ -28,9 +28,13 @@ fun PrivacySettingsScreen(onBack: () -> Unit) {
     var showDialog by remember { mutableStateOf(false) }
     var isSending by remember { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
 
     val backgroundColor = MaterialTheme.colorScheme.background
     val contentColor = MaterialTheme.colorScheme.onBackground
+
+    val accountVm: com.example.cnnct.settings.viewmodel.AccountViewModel =
+        androidx.lifecycle.viewmodel.compose.viewModel(factory = com.example.cnnct.settings.viewmodel.AccountViewModel.Factory)
 
     Scaffold(
         topBar = {
@@ -46,9 +50,7 @@ fun PrivacySettingsScreen(onBack: () -> Unit) {
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = backgroundColor,
-                    titleContentColor = contentColor,
-                    navigationIconContentColor = contentColor
+                    containerColor = backgroundColor
                 )
             )
         },
@@ -71,11 +73,7 @@ fun PrivacySettingsScreen(onBack: () -> Unit) {
                     onClick = {
                         val email = auth.currentUser?.email
                         if (email.isNullOrEmpty()) {
-                            Toast.makeText(
-                                context,
-                                "No email associated with this account.",
-                                Toast.LENGTH_SHORT
-                            ).show()
+                            Toast.makeText(context, "No email found.", Toast.LENGTH_SHORT).show()
                             return@Button
                         }
 
@@ -83,154 +81,141 @@ fun PrivacySettingsScreen(onBack: () -> Unit) {
                         auth.sendPasswordResetEmail(email)
                             .addOnSuccessListener {
                                 isSending = false
-                                Toast.makeText(
-                                    context,
-                                    "Password reset email sent to $email",
-                                    Toast.LENGTH_LONG
-                                ).show()
+                                Toast.makeText(context, "Reset email sent to $email", Toast.LENGTH_LONG).show()
                             }
                             .addOnFailureListener {
                                 isSending = false
-                                Toast.makeText(
-                                    context,
-                                    "Failed to send reset email: ${it.message}",
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                                Toast.makeText(context, "Error: ${it.message}", Toast.LENGTH_SHORT).show()
                             }
                     },
                     enabled = !isSending,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
+                    modifier = Modifier.fillMaxWidth().height(52.dp)
                 ) {
                     if (isSending) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            color = Color.White,
-                            strokeWidth = 2.dp
-                        )
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White, strokeWidth = 2.dp)
                     } else {
                         Text("Send Password Reset Email")
                     }
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
                 // 🚪 Logout button
                 OutlinedButton(
                     onClick = { showLogoutDialog = true },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    )
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
                 ) {
                     Text("Logout")
                 }
 
-                Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(24.dp))
 
                 // 🔒 Privacy info card
                 ElevatedCard(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.elevatedCardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    ),
+                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                     onClick = { showDialog = true }
                 ) {
                     Column(
-                        modifier = Modifier
-                            .padding(20.dp)
-                            .fillMaxWidth(),
+                        modifier = Modifier.padding(20.dp).fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(
-                            "Your Privacy Matters",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                            textAlign = TextAlign.Center
-                        )
+                        Text("Your Privacy Matters", fontWeight = FontWeight.Bold)
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            "Your messages and account data are encrypted and securely stored in Google Cloud Firestore.",
+                            "Your data is encrypted and stored in Google Cloud Firestore.",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center
                         )
                     }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // 🗑️ Delete Account Button
+                Button(
+                    onClick = { showDeleteDialog = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = MaterialTheme.shapes.medium
+                ) {
+                    Text("Delete Account", fontWeight = FontWeight.Bold)
                 }
             }
 
             // Footer
             Text(
-                text = "CNNCT© 2025",
+                text = "CNNCT© 2026",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(vertical = 16.dp)
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp)
             )
         }
     }
 
-    // 🗨️ Privacy message dialog
+    // --- DIALOGS (Inside the Composable function) ---
+
     if (showDialog) {
         AlertDialog(
             onDismissRequest = { showDialog = false },
-            confirmButton = {
-                TextButton(onClick = { showDialog = false }) {
-                    Text("Got it")
-                }
-            },
+            confirmButton = { TextButton(onClick = { showDialog = false }) { Text("Got it") } },
             title = { Text("Your Privacy Matters") },
-            text = {
-                Text(
-                    "Your messages and account data are encrypted and securely stored in Google Cloud Firestore.",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
+            text = { Text("Your messages and account data are encrypted and securely stored in Google Cloud Firestore.") }
         )
     }
 
-    // 🚪 Logout confirmation dialog
     if (showLogoutDialog) {
         AlertDialog(
             onDismissRequest = { showLogoutDialog = false },
             title = { Text("Logout?") },
-            text = {
-                Text(
-                    "You will be signed out from your account and redirected to the login page."
-                )
-            },
+            text = { Text("You will be signed out and redirected to the login page.") },
             confirmButton = {
                 TextButton(
                     onClick = {
                         showLogoutDialog = false
-
-                        // 🔒 Sign out from Firebase + Google
-                        try {
-                            auth.signOut()
-                            val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).build()
-                            val googleClient = GoogleSignIn.getClient(context, gso)
-                            googleClient.signOut().addOnCompleteListener {
-                                val intent = Intent(context, LoginActivity::class.java)
-                                intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                                context.startActivity(intent)
+                        auth.signOut()
+                        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).build()
+                        GoogleSignIn.getClient(context, gso).signOut().addOnCompleteListener {
+                            val intent = Intent(context, LoginActivity::class.java).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
                             }
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "Error signing out: ${e.message}", Toast.LENGTH_SHORT).show()
+                            context.startActivity(intent)
                         }
                     }
-                ) {
-                    Text("Logout", color = MaterialTheme.colorScheme.error)
-                }
+                ) { Text("Logout", color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = {
-                TextButton(onClick = { showLogoutDialog = false }) {
-                    Text("Cancel")
-                }
-            }
+            dismissButton = { TextButton(onClick = { showLogoutDialog = false }) { Text("Cancel") } }
+        )
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete Account") },
+            text = { Text("Are you sure? This action cannot be undone and all data will be permanently lost.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteDialog = false
+                        accountVm.deleteAccount(
+                            onSuccess = {
+                                auth.signOut()
+                                val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).build()
+                                GoogleSignIn.getClient(context, gso).signOut().addOnCompleteListener {
+                                    val intent = Intent(context, LoginActivity::class.java).apply {
+                                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                                    }
+                                    context.startActivity(intent)
+                                }
+                            },
+                            onError = { err -> Toast.makeText(context, err, Toast.LENGTH_LONG).show() }
+                        )
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") } }
         )
     }
 }

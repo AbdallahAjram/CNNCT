@@ -126,7 +126,7 @@ fun ChatScreen(
 ) {
     val ctx = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
-    val messagesRaw = uiState.messages
+    val messagesRaw = uiState.messages + uiState.pendingMessages
     val memberMetaLive = uiState.memberMeta
 
     // ⬇️ NEW: AI ViewModel and state
@@ -334,7 +334,7 @@ fun ChatScreen(
     val pickMedia = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia()
     ) { uris ->
-        if (uris.isNotEmpty()) viewModel.sendAttachments(chatId, currentUserId, uris, ctx.contentResolver)
+        if (uris.isNotEmpty()) viewModel.sendAttachments(chatId, currentUserId, uris, ctx)
     }
 
     val pickDocuments = rememberLauncherForActivityResult(
@@ -346,7 +346,7 @@ fun ChatScreen(
                     ctx.contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 } catch (_: SecurityException) {}
             }
-            viewModel.sendAttachments(chatId, currentUserId, uris, ctx.contentResolver)
+            viewModel.sendAttachments(chatId, currentUserId, uris, ctx)
         }
     }
 

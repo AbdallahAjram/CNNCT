@@ -76,4 +76,26 @@ class SettingsRepository(
         }
         auth.currentUser?.updateProfile(updates)?.await()
     }
+    suspend fun deleteUserData() {
+        val uid = requireUid()
+        // Best-effort client-side wipes of known collections
+        
+        // 1. users/{uid}
+        db.collection("users").document(uid).delete().await()
+        
+        // 2. userChats/{uid} - Subcollection requires manual delete of docs
+        try {
+            val userChats = db.collection("userChats").document(uid).collection("chats").get().await()
+            for (doc in userChats) {
+                doc.reference.delete()
+            }
+            db.collection("userChats").document(uid).delete().await()
+        } catch (e: Exception) { /* ignore */ }
+        
+        // 3. userCalls/{uid}
+        try {
+             db.collection("userCalls").document(uid).collection("calls").get().await().forEach { it.reference.delete() }
+             db.collection("userCalls").document(uid).delete().await()
+        } catch (e: Exception) { /* ignore */ }
+    }
 }

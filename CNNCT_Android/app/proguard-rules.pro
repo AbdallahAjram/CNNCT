@@ -5,9 +5,9 @@
 # Firebase & Firestore Models
 # Keep all data classes used for Firestore serialization/deserialization
 -keep class com.cnnct.chat.mvc.model.** { *; }
--keep class com.example.cnnct.chat.model.** { *; }
+-keep class com.abdallah.cnnct.chat.model.** { *; }
 # Also keep any other potential model locations just in case
--keep class com.example.cnnct.chat.core.model.** { *; }
+-keep class com.abdallah.cnnct.chat.core.model.** { *; }
 
 
 # Agora SDK
@@ -16,7 +16,7 @@
 
 # AI / OpenAI
 # Keep AI repository and related classes if they are used via reflection or serialization
--keep class com.example.cnnct.chat.core.ai.** { *; }
+-keep class com.abdallah.cnnct.chat.core.ai.** { *; }
 
 # Other common Android defaults (usually in default android rules, but good to ensure)
 -keep public class * extends android.app.Activity

@@ -16,11 +16,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.cnnct"
+    namespace = "com.abdallah.cnnct"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.example.cnnct"
+        applicationId = "com.abdallah.cnnct"
         minSdk = 24
         targetSdk = 35
         versionCode = 1

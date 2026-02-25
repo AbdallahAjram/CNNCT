@@ -33,10 +33,6 @@
         android:enableOnBackInvokedCallback="true"
         tools:targetApi="31">
 
-        <meta-data
-            android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-3940256099942544~3347511713"/>
-
         <!-- FileProvider for sharing temporary files -->
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -71,6 +67,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -124,5 +121,18 @@
         <activity android:name=".settings.view.ArchiveSettingsActivity" android:exported="false"/>
         <activity android:name=".settings.view.PrivacySettingsActivity" android:exported="false"/>
         <activity android:name=".settings.view.BlockedSettingsActivity" android:exported="false"/>
+        <!-- Remove Agora screen sharing components -->
+        <activity
+            android:name="io.agora.rtc2.extensions.MediaProjectionMgr$LocalScreenCaptureAssistantActivity"
+            tools:node="remove" />
+
+        <service
+            android:name="io.agora.rtc2.extensions.MediaProjectionMgr$LocalScreenSharingService"
+            tools:node="remove" />
+
     </application>
+
+    <!-- Remove Agora screen sharing permissions -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" tools:node="remove" />
+
 </manifest>

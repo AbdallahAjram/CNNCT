@@ -10,6 +10,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.Chat
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -78,6 +79,7 @@ fun PersonInfoScreen(
             }
         },
         onBlock = { vm.block() },
+        onUnblock = { vm.unblock() },
         onReport = { reason -> vm.reportUser(reason) }
     )
 }
@@ -92,6 +94,7 @@ fun PersonInfoContent(
     onCall: () -> Unit,
     onChat: () -> Unit,
     onBlock: () -> Unit,
+    onUnblock: () -> Unit,
     onReport: (String) -> Unit
 ) {
     Scaffold(
@@ -150,7 +153,26 @@ fun PersonInfoContent(
                     InfoCard(title = "Phone", subtitle = u.phoneNumber ?: "—")
 
                     Spacer(Modifier.height(24.dp))
-                    DangerCard(label = "Block user", onClick = onBlock)
+                    Spacer(Modifier.height(24.dp))
+                    
+                    if (state.isBlocked) {
+                        // Unblock button
+                        Button(
+                            onClick = onUnblock,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Rounded.Check, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Unblock user")
+                        }
+                    } else {
+                        // Block button
+                        DangerCard(label = "Block user", onClick = onBlock)
+                    }
                     
                     Spacer(Modifier.height(16.dp))
                     

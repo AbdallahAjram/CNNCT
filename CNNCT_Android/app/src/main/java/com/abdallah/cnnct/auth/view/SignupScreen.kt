@@ -122,13 +122,15 @@ fun SignupScreen(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 OutlinedTextField(
-                    value = formatPhoneForUi(phoneDigits),
+                    value = phoneDigits,
                     onValueChange = { input ->
-                        // Keep digits only internally
-                        phoneDigits = input.filter { it.isDigit() }.take(8)
+                        if (input.length <= 8 && input.all { it.isDigit() }) {
+                            phoneDigits = input
+                        }
                     },
                     label = { Text("Phone (03-123456)") },
                     singleLine = true,
+                    visualTransformation = PhoneNumberVisualTransformation(),
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Number,
                         imeAction = ImeAction.Next

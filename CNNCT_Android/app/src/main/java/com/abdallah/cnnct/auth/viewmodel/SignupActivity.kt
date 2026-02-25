@@ -138,7 +138,7 @@ class SignupActivity : ComponentActivity() {
                     // Send verification email
                     user.sendEmailVerification()
                         .addOnSuccessListener {
-                            toast("Verification email sent. Check your inbox.")
+                            toast("Verification email sent. Check your inbox and spam folder.")
                             startActivity(Intent(this, LoginActivity::class.java))
                             finish()
                         }

@@ -128,8 +128,9 @@ class CallRepository(
 
         val reg = callsCol
             .whereEqualTo("calleeId", me)
+            .whereEqualTo("calleeId", me)
             .whereEqualTo("status", "ringing")
-            .orderBy("createdAt", Query.Direction.DESCENDING)
+            // Removed orderBy("createdAt") to avoid index
             .limit(1)
             .addSnapshotListener { snap, e ->
                 if (e != null) {
@@ -196,7 +197,8 @@ class CallRepository(
 
         val r1 = callsCol
             .whereEqualTo("callerId", uid)
-            .orderBy("createdAt", Query.Direction.DESCENDING)
+            .whereEqualTo("callerId", uid)
+            // Removed orderBy("createdAt") to avoid index requirement
             .limit(50)
             .addSnapshotListener { snap, e ->
                 if (e != null) {
@@ -209,7 +211,8 @@ class CallRepository(
 
         val r2 = callsCol
             .whereEqualTo("calleeId", uid)
-            .orderBy("createdAt", Query.Direction.DESCENDING)
+            .whereEqualTo("calleeId", uid)
+            // Removed orderBy("createdAt") to avoid index requirement
             .limit(50)
             .addSnapshotListener { snap, e ->
                 if (e != null) {

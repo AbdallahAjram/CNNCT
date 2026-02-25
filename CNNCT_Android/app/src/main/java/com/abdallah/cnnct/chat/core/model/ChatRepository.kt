@@ -7,6 +7,8 @@ import com.abdallah.cnnct.homepage.model.ChatSummary
 
 interface ChatRepository {
     suspend fun ensurePrivateChat(userA: String, userB: String): String
+    
+    suspend fun ensureChatExists(chatId: String, currentUserId: String)
 
     suspend fun sendMessage(
         chatId: String,
@@ -83,4 +85,6 @@ interface ChatRepository {
     suspend fun muteChatForHours(userId: String, chatId: String, hours: Long)
     suspend fun muteChatForever(userId: String, chatId: String)
     suspend fun unmuteChat(userId: String, chatId: String)
+
+    suspend fun setBlockStatus(chatId: String, myUserId: String, peerUserId: String, blocked: Boolean)
 }

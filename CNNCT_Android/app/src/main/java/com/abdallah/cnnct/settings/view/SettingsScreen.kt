@@ -53,15 +53,7 @@ fun SettingsScreen(
                         )
                     }
                 },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(
-                            imageVector = Icons.Default.ArrowBack,
-                            contentDescription = "Back",
-                            tint = TextBlack
-                        )
-                    }
-                }
+                /* navigationIcon removed as requested */
             )
         }
     ) { innerPadding ->

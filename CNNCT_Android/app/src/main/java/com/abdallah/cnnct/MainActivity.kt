@@ -45,7 +45,18 @@ class MainActivity : AppCompatActivity() {
             }
 
             kotlinx.coroutines.delay(2000) // Reduced from 3000 to 2000 for snappier feel
-            val currentUser = FirebaseAuth.getInstance().currentUser
+            var currentUser = FirebaseAuth.getInstance().currentUser
+            
+            // Reload user to get fresh email verification status
+            if (currentUser != null) {
+                try {
+                    currentUser.reload().await()
+                    currentUser = FirebaseAuth.getInstance().currentUser
+                } catch (e: Exception) {
+                    // unexpected error or network issue; proceed with cached user
+                }
+            }
+
             when {
                 currentUser == null -> {
                     startActivity(Intent(this@MainActivity, LoginActivity::class.java))
@@ -53,7 +64,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 !currentUser.isEmailVerified -> {
                     Toast.makeText(this@MainActivity,
-                        "Please verify your email before logging in.",
+                        "Please verify your email before logging in. Check your spam folder.",
                         Toast.LENGTH_LONG
                     ).show()
                     FirebaseAuth.getInstance().signOut()

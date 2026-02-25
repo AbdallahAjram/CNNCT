@@ -73,7 +73,7 @@ class LoginActivity : ComponentActivity() {
                                                             // Ask if they want a new verification email
                                                             AlertDialog.Builder(this@LoginActivity)
                                                                 .setTitle("Email not verified")
-                                                                .setMessage("Would you like us to resend the verification email?")
+                                                                .setMessage("Would you like us to resend the verification email?\n(Please check your spam folder)")
                                                                 .setPositiveButton("Resend") { _, _ ->
                                                                     user?.sendEmailVerification()
                                                                         ?.addOnSuccessListener {
@@ -104,11 +104,11 @@ class LoginActivity : ComponentActivity() {
                                         startActivity(Intent(this, HomeActivity::class.java))
                                         finish()
                                     } else {
-                                        Toast.makeText(this, "Please verify your email before logging in.", Toast.LENGTH_LONG).show()
+                                        Toast.makeText(this, "Please verify your email before logging in. Check your spam folder.", Toast.LENGTH_LONG).show()
                                         // Ask if they want a new verification email
                                         AlertDialog.Builder(this@LoginActivity)
                                             .setTitle("Email not verified")
-                                            .setMessage("Would you like us to resend the verification email?")
+                                            .setMessage("Would you like us to resend the verification email?\n(Please check your spam folder)")
                                             .setPositiveButton("Resend") { _, _ ->
                                                 user?.sendEmailVerification()
                                                     ?.addOnSuccessListener {
@@ -219,7 +219,7 @@ class LoginActivity : ComponentActivity() {
         val name = doc.getString("name")
         val display = doc.getString("displayName")
         val phone = doc.getString("phoneNumber")
-        return !name.isNullOrBlank() && !display.isNullOrBlank() && !phone.isNullOrBlank()
+        return !name.isNullOrBlank() && !display.isNullOrBlank()
     }
 
 

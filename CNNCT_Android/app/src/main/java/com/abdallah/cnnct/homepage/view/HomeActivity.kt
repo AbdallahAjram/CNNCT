@@ -123,11 +123,12 @@ class HomeActivity : ComponentActivity() {
                         val context = LocalContext.current
                         val db = remember { com.google.firebase.firestore.FirebaseFirestore.getInstance() }
                         val repo = remember { com.cnnct.chat.mvc.model.FirestoreChatRepository(db) }
+                        val userRepo = remember { com.abdallah.cnnct.chat.core.repository.UserRepository(db) }
                         
                         val factory = object : androidx.lifecycle.ViewModelProvider.Factory {
                             @Suppress("UNCHECKED_CAST")
                             override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
-                                return com.cnnct.chat.mvc.controller.ChatViewModel(repo, currentUserId) as T
+                                return com.cnnct.chat.mvc.controller.ChatViewModel(repo, userRepo, currentUserId) as T
                             }
                         }
                         

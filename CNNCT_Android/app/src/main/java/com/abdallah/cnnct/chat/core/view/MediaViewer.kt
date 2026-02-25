@@ -78,20 +78,21 @@ fun MediaViewerDialog(
                             if (!saving) {
                                 saving = true
                                 scope.launch(Dispatchers.IO) {
-                                    val ok = saveToGallery(ctx, url, fileName)
+                                    val result = saveToGallery(ctx, url, fileName)
                                     withContext(Dispatchers.Main) {
                                         saving = false
-                                        Toast.makeText(
-                                            ctx,
-                                            if (ok) "Saved to Gallery" else "Failed to save",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
+                                        val msg = when (result) {
+                                            SaveResult.GALLERY -> "Saved to Gallery"
+                                            SaveResult.DOWNLOADS -> "Saved to Downloads"
+                                            SaveResult.ERROR -> "Failed to save"
+                                        }
+                                        Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             }
                         }
                     ) {
-                        Icon(Icons.Filled.Download, contentDescription = "Save to Gallery")
+                        Icon(Icons.Filled.Download, contentDescription = "Save")
                     }
                 }
 
@@ -104,6 +105,8 @@ fun MediaViewerDialog(
         }
     }
 }
+
+private enum class SaveResult { GALLERY, DOWNLOADS, ERROR }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -187,13 +190,25 @@ private fun FileViewerPlaceholder() {
 
 /* ---------- Save to Gallery (MediaStore) ---------- */
 
-private fun saveToGallery(context: Context, url: String, fileName: String?): Boolean {
+private fun saveToGallery(context: Context, url: String, fileName: String?): SaveResult {
     // Infer mime/type from file name (fallback to jpg/mp4)
     val lower = (fileName ?: Uri.parse(url).lastPathSegment ?: "file").lowercase()
     val ext = lower.substringAfterLast('.', "")
-    val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
-        ?: if (ext == "mp4" || ext == "mov" || ext == "m4v") "video/mp4" else "image/jpeg"
-    val isVideo = mime.startsWith("video")
+    val detectedMime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+
+    val isVideo = detectedMime?.startsWith("video") == true || ext in listOf("mp4", "mov", "m4v", "3gp")
+    val isImage = detectedMime?.startsWith("image") == true || ext in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic")
+
+    // If it's not a supported media type for MediaStore (e.g. PDF, DOC), fallback to DownloadManager
+    if (!isVideo && !isImage) {
+        return if (enqueueDownload(context, url, fileName)) {
+            SaveResult.DOWNLOADS
+        } else {
+            SaveResult.ERROR
+        }
+    }
+
+    val mime = detectedMime ?: if (isVideo) "video/mp4" else "image/jpeg"
 
     val (collection, relPath) = if (isVideo) {
         (MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY) to "Movies/CNNCT")
@@ -210,36 +225,45 @@ private fun saveToGallery(context: Context, url: String, fileName: String?): Boo
         }
     }
 
-    val resolver = context.contentResolver
-    val itemUri = resolver.insert(collection, values) ?: return false
-
     return try {
+        val resolver = context.contentResolver
+        val itemUri = resolver.insert(collection, values) ?: return SaveResult.ERROR
+
         resolver.openOutputStream(itemUri)?.use { out ->
             URL(url).openStream().use { input -> input.copyTo(out) }
-        } ?: return false
+        } ?: return SaveResult.ERROR
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val v2 = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
             resolver.update(itemUri, v2, null, null)
         }
-        true
-    } catch (e: IOException) {
-        // Cleanup on failure
-        try { resolver.delete(itemUri, null, null) } catch (_: Exception) {}
-        false
+        SaveResult.GALLERY
+    } catch (e: Exception) {
+        // Cleanup on failure (specifically catch IllegalArgumentException from bad inserts)
+        e.printStackTrace()
+        SaveResult.ERROR
     }
 }
 
 /* ---------- (Old) DownloadManager helper — kept if you still want Downloads folder ---------- */
 @Suppress("unused")
-private fun enqueueDownload(context: Context, url: String, fileName: String?) {
-    val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-    val uri = Uri.parse(url)
-    val cleanName = (fileName?.takeIf { it.isNotBlank() }) ?: uri.lastPathSegment ?: "download"
-    val req = DownloadManager.Request(uri)
-        .setTitle(cleanName)
-        .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, cleanName)
-        .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-        .setAllowedOverRoaming(true)
-    dm.enqueue(req)
+private fun enqueueDownload(context: Context, url: String, fileName: String?): Boolean {
+    return try {
+        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        val uri = Uri.parse(url)
+        val rawName = (fileName?.takeIf { it.isNotBlank() }) ?: uri.lastPathSegment ?: "download"
+        // Sanitize: allow alphanumeric, dot, underscore, dash. Replace others with underscore.
+        val cleanName = rawName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+        
+        val req = DownloadManager.Request(uri)
+            .setTitle(cleanName)
+            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, cleanName)
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setAllowedOverRoaming(true)
+        dm.enqueue(req)
+        true
+    } catch (e: Exception) {
+        e.printStackTrace()
+        false
+    }
 }

@@ -50,27 +50,38 @@ class FirestoreChatRepository(
         val pairKey = makePairKey(userA, userB)
         // Align with your HomePController doc-id scheme if you use it elsewhere:
         val chatId = "priv_$pairKey"
-        val chatRef = chats().document(chatId)
+        ensureChatExists(chatId, userA)
+        return chatId
+    }
 
+    override suspend fun ensureChatExists(chatId: String, currentUserId: String) {
+        val chatRef = chats().document(chatId)
         val snap = chatRef.get().await()
         if (!snap.exists()) {
-            val now = FieldValue.serverTimestamp()
-            chatRef.set(
-                mapOf(
-                    "type" to "private",
-                    "members" to listOf(userA, userB),
-                    "pairKey" to pairKey,              // include pairKey to satisfy rules
-                    "createdAt" to now,
-                    "updatedAt" to now,
-                    "lastMessageText" to "",
-                    "lastMessageTimestamp" to null,
-                    "lastMessageSenderId" to null,
-                    "lastMessageId" to null
-                ),
-                SetOptions.merge()
-            ).await()
+             // Logic moved from ChatRoute: infer members from ID if possible
+             val parts = chatId.removePrefix("priv_").split("#")
+             val members = if (parts.size >= 2) parts else listOf(currentUserId)
+             
+             // If it looks like a private chat, set it up
+             if (chatId.startsWith("priv_") && members.size >= 2) {
+                 val pairKey = makePairKey(members[0], members[1])
+                 val now = FieldValue.serverTimestamp()
+                 chatRef.set(
+                    mapOf(
+                        "type" to "private",
+                        "members" to members,
+                        "pairKey" to pairKey,
+                        "createdAt" to now,
+                        "updatedAt" to now,
+                        "lastMessageText" to "",
+                        "lastMessageTimestamp" to null,
+                        "lastMessageSenderId" to null,
+                        "lastMessageId" to null
+                    ),
+                    SetOptions.merge()
+                 ).await()
+             }
         }
-        return chatId
     }
 
     override suspend fun sendMessage(
@@ -658,6 +669,23 @@ class FirestoreChatRepository(
             )
         } catch (e: Exception) {
              null
+        }
+    }
+    override suspend fun setBlockStatus(chatId: String, myUserId: String, peerUserId: String, blocked: Boolean) {
+        try {
+            chats().document(chatId).set(
+                mapOf(
+                    "memberMeta" to mapOf(
+                        myUserId to mapOf("iBlockedPeer" to blocked),
+                        peerUserId to mapOf("blockedByOther" to blocked)
+                    ),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                ),
+                SetOptions.merge()
+            ).await()
+        } catch (e: Exception) {
+            // log or rethrow?
+            throw e
         }
     }
 }

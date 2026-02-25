@@ -2,11 +2,13 @@ package com.abdallah.cnnct.auth.view
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -105,17 +107,20 @@ fun CompleteProfileScreen(
                         style = MaterialTheme.typography.bodyLarge
                     )
                     OutlinedTextField(
-                        value = formatPhoneForUi(phoneDigits),
+                        value = phoneDigits,
                         onValueChange = { input ->
                             if (!phoneLocked) {
-                                // keep digits-only in state; UI shows dashed
-                                phoneDigits = input.filter { it.isDigit() }.take(8)
+                                if (input.length <= 8 && input.all { it.isDigit() }) {
+                                    phoneDigits = input
+                                }
                             }
                         },
                         label = { Text(if (phoneLocked) "Phone (locked)" else "Phone (03-123456)") },
                         singleLine = true,
+                        visualTransformation = PhoneNumberVisualTransformation(),
                         enabled = !phoneLocked && !isLoading, // disable if already set or loading
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                     )
                 }
 

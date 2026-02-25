@@ -182,6 +182,7 @@ class CompleteProfileActivity : ComponentActivity() {
                             val userPatch = hashMapOf(
                                 "name" to name,
                                 "displayName" to normalizedDisplay,
+                                "searchName" to normalizedDisplay.lowercase(),
                                 "email" to (auth.currentUser?.email ?: ""),
                                 "updatedAt" to FieldValue.serverTimestamp()
                             ).apply {

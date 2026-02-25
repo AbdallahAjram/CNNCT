@@ -8,7 +8,8 @@ data class UserProfile(
     val displayName: String = "",
     val phoneNumber: String? = null,
     val about: String? = null,
-    val photoUrl: String? = null
+    val photoUrl: String? = null,
+    val searchName: String? = null
 ) {
     fun initials(): String =
         displayName.trim()

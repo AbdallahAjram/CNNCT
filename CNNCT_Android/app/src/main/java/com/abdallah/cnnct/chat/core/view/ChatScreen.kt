@@ -67,6 +67,8 @@ import kotlin.time.Duration.Companion.minutes
 // ⬇️ NEW imports for location/permissions
 import android.Manifest
 import android.content.pm.PackageManager
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
@@ -593,9 +595,11 @@ fun ChatScreen(
                 when {
                     iBlockedPeer -> {
                         BlockBanner(
-                            text = "🚫 You blocked this user. To chat, unblock first.",
+                            text = "🚫 You blocked this user.",
                             bg = MaterialTheme.colorScheme.error,
-                            fg = MaterialTheme.colorScheme.onError
+                            fg = MaterialTheme.colorScheme.onError,
+                            actionLabel = "Unblock",
+                            onAction = { viewModel.unblockPeer(chatId) }
                         )
                     }
                     blockedByOther -> {
@@ -1181,15 +1185,42 @@ private fun HighlightedText(
 private data class TextSpan(val text: String, val isHighlighted: Boolean)
 
 @Composable
-private fun BlockBanner(text: String, bg: Color, fg: Color) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(bg)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
+fun BlockBanner(
+    text: String,
+    bg: Color,
+    fg: Color,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null
+) {
+    Surface(
+        color = bg,
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Text(text, color = fg, style = MaterialTheme.typography.bodyMedium)
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text,
+                modifier = Modifier.weight(1f),
+                color = fg,
+                style = MaterialTheme.typography.bodyMedium
+            )
+            if (actionLabel != null && onAction != null) {
+                Spacer(Modifier.width(8.dp))
+                Button(
+                    onClick = onAction,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        contentColor = bg
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    modifier = Modifier.height(32.dp)
+                ) {
+                    Text(actionLabel)
+                }
+            }
+        }
     }
 }
 

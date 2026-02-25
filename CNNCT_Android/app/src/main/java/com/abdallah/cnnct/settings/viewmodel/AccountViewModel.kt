@@ -32,23 +32,17 @@ class AccountViewModel(
         repo.refreshProfile()
     }
 
-    fun updateDisplayName(name: String) = viewModelScope.launch {
-        if (name.isBlank()) return@launch
-        try {
-            repo.updateDisplayName(name)
-            repo.refreshProfile()
-        } catch (e: Exception) {
-            // Handle error (maybe expose via a separate shared flow or state)
-        }
+    suspend fun updateDisplayName(name: String) {
+        if (name.isBlank()) return
+        android.util.Log.d("ProfileDebug", "ViewModel: updateDisplayName called with '$name'")
+        repo.updateDisplayName(name)
+        repo.refreshProfile()
     }
 
-    fun updateAbout(about: String) = viewModelScope.launch {
-        try {
-            repo.updateAbout(about)
-            repo.refreshProfile()
-        } catch (e: Exception) {
-            // Handle error
-        }
+    suspend fun updateAbout(about: String) {
+        android.util.Log.d("ProfileDebug", "ViewModel: updateAbout called with '$about'")
+        repo.updateAbout(about)
+        repo.refreshProfile()
     }
 
     fun uploadAndSaveAvatar(uri: Uri, onSuccess: () -> Unit, onError: (String) -> Unit) =

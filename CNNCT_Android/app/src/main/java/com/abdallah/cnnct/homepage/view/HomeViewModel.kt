@@ -36,6 +36,7 @@ class HomeViewModel(
         if (currentUserId.isNotBlank()) {
             observeChats()
             startDeliveryPolling()
+            viewModelScope.launch { userRepo.ensureSearchName() }
         } else {
             _uiState.update { it.copy(loading = false, error = "Not signed in") }
         }

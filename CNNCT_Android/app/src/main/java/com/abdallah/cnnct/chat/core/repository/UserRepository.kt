@@ -21,6 +21,23 @@ class UserRepository(
         return d.toObject(UserProfile::class.java) ?: UserProfile(uid, "Unknown")
     }
 
+    suspend fun ensureSearchName() {
+        try {
+            val uid = me()
+            val ref = db.collection("users").document(uid)
+            val snap = ref.get().await()
+            if (snap.exists()) {
+                val searchName = snap.getString("searchName")
+                val displayName = snap.getString("displayName")
+                if (searchName == null && !displayName.isNullOrBlank()) {
+                    ref.update("searchName", displayName.trim().lowercase()).await()
+                }
+            }
+        } catch (e: Exception) {
+            // ignore
+        }
+    }
+
     suspend fun getUsers(uids: List<String>): List<UserProfile> {
         if (uids.isEmpty()) return emptyList()
         val chunks = uids.distinct().chunked(10)
@@ -70,18 +87,30 @@ class UserRepository(
     suspend fun searchUsers(query: String, limit: Int = 20): List<UserProfile> {
         val q = query.trim()
         if (q.isBlank()) return emptyList()
+        val qLower = q.lowercase()
 
         val results = mutableMapOf<String, UserProfile>()
         
-        // Name search
-        val nameSnap = db.collection("users")
-            .whereGreaterThanOrEqualTo("displayName", q)
-            .whereLessThanOrEqualTo("displayName", q + '\uf8ff')
+        // 1. Case-insensitive search (using searchName)
+        val searchNameSnap = db.collection("users")
+            .whereGreaterThanOrEqualTo("searchName", qLower)
+            .whereLessThanOrEqualTo("searchName", qLower + '\uf8ff')
             .limit(limit.toLong())
             .get().await()
-        results.putAll(nameSnap.toObjects(UserProfile::class.java).associateBy { it.uid })
+        results.putAll(searchNameSnap.toObjects(UserProfile::class.java).associateBy { it.uid })
 
-        // Phone search (if digits present)
+        // 2. Legacy fallback: Direct Display Name search (Case-sensitive)
+        // Useful for old users who haven't updated their profile yet to have 'searchName'
+        if (results.size < limit) {
+             val nameSnap = db.collection("users")
+                .whereGreaterThanOrEqualTo("displayName", q)
+                .whereLessThanOrEqualTo("displayName", q + '\uf8ff')
+                .limit(limit.toLong())
+                .get().await()
+             results.putAll(nameSnap.toObjects(UserProfile::class.java).associateBy { it.uid })
+        }
+
+        // 3. Phone search (if digits present)
         val digits = q.filter { it.isDigit() }
         if (digits.length >= 2) {
             val phoneSnap = db.collection("users")

@@ -92,24 +92,14 @@ fun ChatRoute(
 
                 var members = (data["members"] as? List<*>)?.filterIsInstance<String>().orEmpty()
                 
-                // 🛠️ REPAIR: If members missing (ghost/corruption), infer from ID
+                // 🛠️ REPAIR: If members missing (ghost/corruption), inferred from ID
+                // Logic moved to Repository to avoid race conditions
                 if (members.isEmpty()) {
                     val parts = chatId.split("_").filter { it != "priv" && it.isNotBlank() }
                     if (parts.isNotEmpty()) {
                         val inferred = (parts + currentUserId).distinct()
                         if (inferred.size > 1) {
                             members = inferred
-                            val pairKey = members.sorted().joinToString("#")
-                            db.collection("chats").document(chatId)
-                                .set(
-                                    mapOf(
-                                        "members" to members, 
-                                        "type" to "private",
-                                        "pairKey" to pairKey,
-                                        "updatedAt" to FieldValue.serverTimestamp()
-                                    ),
-                                    SetOptions.merge()
-                                )
                         }
                     }
                 }

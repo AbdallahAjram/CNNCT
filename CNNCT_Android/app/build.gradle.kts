@@ -1,6 +1,5 @@
 import java.util.Properties
 
-// 1. Load local.properties safely
 val localProperties = Properties()
 val localPropertiesFile = rootProject.file("local.properties")
 if (localPropertiesFile.exists()) {
@@ -23,20 +22,17 @@ android {
         applicationId = "com.abdallah.cnnct"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 9
+        versionName = "1.0.7"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         val agoraId = localProperties.getProperty("agora.appId") ?: ""
         buildConfigField("String", "AGORA_APP_ID", "\"${agoraId}\"")
     }
 
-    // --- FIX STARTS HERE ---
-    // You must define the 'release' configuration before buildTypes tries to use it.
     signingConfigs {
         create("release") {
-            // This points to your local debug key so the Gradle Sync works.
-            // When you are ready for the Play Store, update these paths to your CNNCT.jks file.
+            // Keep your existing debug key for now, or update to your .jks
             storeFile = file(System.getProperty("user.home") + "/.android/debug.keystore")
             storePassword = "android"
             keyAlias = "androiddebugkey"
@@ -52,11 +48,12 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // This now correctly references the "release" config created above
             signingConfig = signingConfigs.getByName("release")
+
+            // --- ADDED THIS LINE TO FIX GOOGLE PLAY WARNING ---
+            ndk.debugSymbolLevel = "FULL"
         }
     }
-    // --- FIX ENDS HERE ---
 
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
@@ -81,6 +78,9 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+        jniLibs {
+            keepDebugSymbols += "**/lib*.so"
+        }
     }
 }
 
@@ -90,7 +90,6 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("com.google.android.ads:mediation-test-suite:3.0.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     implementation("androidx.compose.material:material-icons-extended")
@@ -119,17 +118,12 @@ dependencies {
     implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.firebase:firebase-storage-ktx")
     implementation("com.google.firebase:firebase-messaging-ktx")
-    implementation ("com.google.firebase:firebase-functions-ktx")
+    implementation("com.google.firebase:firebase-functions-ktx")
     testImplementation("junit:junit:4.13.2")
     implementation("com.google.android.gms:play-services-location:21.3.0")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
-
-    // Hilt
-    // Hilt
     implementation("com.google.dagger:hilt-android:2.51.1")
     kapt("com.google.dagger:hilt-android-compiler:2.51.1")
-
-    // Desugaring
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 }

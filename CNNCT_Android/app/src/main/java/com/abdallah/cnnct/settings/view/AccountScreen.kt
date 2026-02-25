@@ -121,14 +121,22 @@ fun AccountScreen(
         contentPadding = contentPadding,
         onUpdateDisplayName = { name ->
              scope.launch {
-                 vm.updateDisplayName(name)
-                 snackbarHostState.showSnackbar("Display name updated successfully")
+                 try {
+                     vm.updateDisplayName(name)
+                     snackbarHostState.showSnackbar("Display name updated successfully")
+                 } catch (e: Exception) {
+                     snackbarHostState.showSnackbar("Failed to update name: ${e.message}")
+                 }
              }
         },
         onUpdateAbout = { about ->
              scope.launch {
-                 vm.updateAbout(about)
-                 snackbarHostState.showSnackbar("About section updated successfully")
+                 try {
+                     vm.updateAbout(about)
+                     snackbarHostState.showSnackbar("About section updated successfully")
+                 } catch (e: Exception) {
+                     snackbarHostState.showSnackbar("Failed to update about: ${e.message}")
+                 }
              }
         },
         onPickPhoto = {
@@ -166,9 +174,12 @@ fun AccountScreenContent(
     val scope = rememberCoroutineScope()
 
     // Sync local state when profile changes (and not editing)
+    // Sync local state when profile changes (and not editing)
     LaunchedEffect(profile) {
         profile?.let {
             localProfile = it
+            // ONLY update the text fields if we are NOT currently editing them.
+            // If we are editing, we don't want the background refresh to overwrite what the user is typing.
             if (!nameEditing) {
                 nameText = it.displayName
                 nameOriginal = it.displayName
@@ -361,7 +372,9 @@ private fun EditableBubble(
                 .padding(vertical = 4.dp)
                 .focusRequester(focusRequester)
                 .onFocusChanged { state ->
-                    if (isEditing && !state.isFocused) onCancel()
+                    // Removed auto-cancel on focus loss to prevent state races.
+                    // Accessing 'isEditing' here captures the initial state of the lambda, 
+                    // or if it captures the state ref, it might still be flaky if focus clears during save.
                 },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { if (canSave) onSave() else onCancel() }),

@@ -32,8 +32,12 @@ data class ChatUiState(
 // 💡 EXPLANATION:
 // Inheriting from Android's ViewModel() allows this class to survive configuration changes
 // (like screen rotation) automatically. No more manual recreation in Activity.
+// 💡 EXPLANATION:
+// Inheriting from Android's ViewModel() allows this class to survive configuration changes
+// (like screen rotation) automatically. No more manual recreation in Activity.
 class ChatViewModel(
     private val repo: ChatRepository,
+    private val userRepo: com.abdallah.cnnct.chat.core.repository.UserRepository,
     private val currentUserId: String
 ) : ViewModel() {
 
@@ -44,10 +48,41 @@ class ChatViewModel(
     private var lastPreviewMessageIdForMe: String? = null
     private var peerUserId: String? = null
 
-    fun setPeerUser(id: String?) { peerUserId = id }
+    init {
+        // Listen to global blocked list to keep UI in sync
+        viewModelScope.launch {
+            userRepo.listenBlockedPeers().collectLatest { blockedIds ->
+                val peer = peerUserId
+                if (peer != null) {
+                    val isBlocked = blockedIds.contains(peer)
+                    if (_uiState.value.iBlockedPeer != isBlocked) {
+                         _uiState.update { it.copy(iBlockedPeer = isBlocked) }
+                    }
+                }
+            }
+        }
+    }
+
+    fun setPeerUser(id: String?) { 
+        peerUserId = id
+        // Trigger initial check if we already have the blocked list (flow will re-emit if needed, or we rely on next emission)
+    }
     
     fun setIBlockedPeer(blocked: Boolean) {
         _uiState.update { it.copy(iBlockedPeer = blocked) }
+    }
+
+    fun unblockPeer(chatId: String) {
+        val peer = peerUserId ?: return
+        viewModelScope.launch {
+            try {
+                userRepo.unblockPeer(peer)
+                // Also update chat flags so the other user sees the unblock immediately
+                repo.setBlockStatus(chatId, currentUserId, peer, false)
+            } catch (e: Exception) {
+                _uiState.update { it.copy(sendError = "Failed to unblock: ${e.message}") }
+            }
+        }
     }
 
     fun clearError() {
@@ -68,6 +103,14 @@ class ChatViewModel(
         // Combined Flow collection.
         // We launch two coroutines for the two streams: Messages and MemberMeta.
         streamJob = viewModelScope.launch {
+            // ✅ Ensure chat doc exists before listening (prevents PERMISSION_DENIED on new chats)
+            try {
+                repo.ensureChatExists(chatId, currentUserId)
+            } catch (e: Exception) {
+               // Log or ignore; if it fails, the stream below might fail or return empty
+               e.printStackTrace()
+            }
+
             launch {
                 repo.streamMessages(chatId, pageSize = 50).collectLatest { list ->
                     val oldSize = _uiState.value.messages.size

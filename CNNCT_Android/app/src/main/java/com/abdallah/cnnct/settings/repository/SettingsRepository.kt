@@ -24,28 +24,39 @@ class SettingsRepository(
 
     suspend fun refreshProfile() {
         val uid = requireUid()
-        val snap = db.collection("users").document(uid).get().await()
+        android.util.Log.d("ProfileDebug", "refreshProfile: Fetching for uid=$uid")
+        val snap = db.collection("users").document(uid).get(com.google.firebase.firestore.Source.SERVER).await()
         val data = snap.toObject(UserProfile::class.java)
         if (data != null) {
+            android.util.Log.d("ProfileDebug", "refreshProfile: Data fetched successfully: $data")
             _profileFlow.value = data
+
         } else {
+            android.util.Log.d("ProfileDebug", "refreshProfile: Parsing manual fields")
             // Fallback if not using toObject or custom fields
-            _profileFlow.value = UserProfile(
+            val newData = UserProfile(
                 uid = uid,
                 displayName = snap.getString("displayName") ?: "",
                 phoneNumber = snap.getString("phoneNumber"),
                 about = snap.getString("about"),
                 photoUrl = snap.getString("photoUrl")
             )
+            _profileFlow.value = newData
+            android.util.Log.d("ProfileDebug", "refreshProfile: New data emitted manually: $newData")
         }
     }
 
     suspend fun updateDisplayName(name: String) {
         val uid = requireUid()
+        android.util.Log.d("ProfileDebug", "updateDisplayName: Updating to '$name' for uid=$uid")
         db.collection("users").document(uid).set(
-            mapOf("displayName" to name),
+            mapOf(
+                "displayName" to name,
+                "searchName" to name.trim().lowercase()
+            ),
             SetOptions.merge()
         ).await()
+        android.util.Log.d("ProfileDebug", "updateDisplayName: Firestore update complete for name='$name'")
 
         val updates = com.google.firebase.auth.userProfileChangeRequest {
             displayName = name
@@ -55,10 +66,12 @@ class SettingsRepository(
 
     suspend fun updateAbout(about: String) {
         val uid = requireUid()
+        android.util.Log.d("ProfileDebug", "updateAbout: Updating to '$about' for uid=$uid")
         db.collection("users").document(uid).set(
             mapOf("about" to about),
             SetOptions.merge()
         ).await()
+        android.util.Log.d("ProfileDebug", "updateAbout: Firestore update complete for about='$about'")
     }
 
     suspend fun uploadAndSaveAvatar(uri: Uri) {

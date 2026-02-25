@@ -83,7 +83,7 @@ To build and run CNNCT locally, follow these steps:
 
 1. **Clone the Repository**:
    ```bash
-   git clone https://github.com/YourUsername/CNNCT_Android.git
+   git clone https://github.com/AbdallahAjram/CNNCT/CNNCT_Android.git
    ```
 
 2. **Firebase Setup**:
@@ -104,4 +104,4 @@ To build and run CNNCT locally, follow these steps:
 ---
 
 ## 📄 License
-*Copyright © 2024 Abdallah Ajram. All rights reserved.*
+*Copyright © 2026 Abdallah Ajram. All rights reserved.*

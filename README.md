@@ -104,4 +104,4 @@ To build and run CNNCT locally, follow these steps:
 ---
 
 ## 📄 License
-*Copyright © 2024 Abdallah Ajram. All rights reserved.*
+*Copyright © 2026 Abdallah Ajram. All rights reserved.*

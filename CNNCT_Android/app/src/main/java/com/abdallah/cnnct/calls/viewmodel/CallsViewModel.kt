@@ -28,7 +28,8 @@ data class CallsUiState(
     val incomingCallerName: String? = null,
     val incomingCallerPhoto: String? = null,
     val isLoading: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    val currentUserProfileUrl: String? = null
 )
 
 class CallsViewModel(
@@ -48,6 +49,13 @@ class CallsViewModel(
     init {
         // Start observing if user is logged in
         if (currentUid.isNotEmpty()) {
+            viewModelScope.launch {
+                userRepo.listenMyProfile().collect { profile ->
+                    val authPhoto = auth.currentUser?.photoUrl?.toString()
+                    val resolvedUrl = profile?.photoUrl ?: authPhoto
+                    _uiState.update { it.copy(currentUserProfileUrl = resolvedUrl) }
+                }
+            }
             observeLogs()
             observeIncoming()
         }

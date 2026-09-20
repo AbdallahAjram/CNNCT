@@ -11,7 +11,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
@@ -40,6 +41,12 @@ import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.abdallah.cnnct.common.state.ComponentState
+import com.abdallah.cnnct.ui.components.ActionableEmptyState
+import com.abdallah.cnnct.ui.components.InlineErrorCard
+import com.abdallah.cnnct.ui.components.ChatListItemSkeleton
+import androidx.compose.material.icons.filled.Chat
+import com.abdallah.cnnct.common.view.UserAvatar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,12 +60,9 @@ fun ChatListScreen(
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: ""
 
     val uiState by viewModel.uiState.collectAsState()
-    val chatSummaries = uiState.chats
+    val chatListState = uiState.chatListState
+    val chatSummaries = if (chatListState is ComponentState.Success) chatListState.data.first else emptyList()
 
-    // We still fetch user profiles for the *list* locally in the view for now (legacy logic),
-    // or we could move this to ViewModel. To minimize regression risk, keeping local mapping logic
-    // but sourcing the IDs from `uiState.chats`.
-    
     var userMap by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var userPhotoMap by remember { mutableStateOf<Map<String, String?>>(emptyMap()) }
     var userPhoneMap by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
@@ -66,11 +70,11 @@ fun ChatListScreen(
     var searchQuery by remember { mutableStateOf("") }
     var showUserPicker by remember { mutableStateOf(false) }
     
-    // Search results from VM
-    val userSearchResults = uiState.searchResults
+    val searchState = uiState.searchState
+    val userSearchResults = if (searchState is ComponentState.Success) searchState.data else emptyList()
 
-    var onlineMap by remember { mutableStateOf<Map<String, Long?>>(emptyMap()) }
-    var presenceRegs by remember { mutableStateOf<List<ListenerRegistration>>(emptyList()) }
+    val presenceState = uiState.presenceState
+    val onlineMap = if (presenceState is ComponentState.Success) presenceState.data else emptyMap()
 
 
     // my block list (uids)
@@ -220,26 +224,7 @@ fun ChatListScreen(
         userPhotoMap = photoMap
         userPhoneMap = phoneMap
 
-        // presence listeners
-        presenceRegs.forEach { it.remove() }
-        presenceRegs = emptyList()
-        val regs = mutableListOf<ListenerRegistration>()
-        for (chunk in targets.chunked(10)) {
-            if (chunk.isEmpty()) continue
-            val reg = db.collection("users")
-                .whereIn(FieldPath.documentId(), chunk)
-                .addSnapshotListener { snap, err ->
-                    if (err != null || snap == null) return@addSnapshotListener
-                    val m = onlineMap.toMutableMap()
-                    for (doc in snap.documents) {
-                        val ts = doc.getTimestamp("lastOnlineAt")?.toDate()?.time
-                        m[doc.id] = ts
-                    }
-                    onlineMap = m
-                }
-            regs += reg
-        }
-        presenceRegs = regs
+        // presence listeners moved to ViewModel
     }
 
 
@@ -274,12 +259,28 @@ fun ChatListScreen(
                 TopAppBar(
                     navigationIcon = {
                         IconButton(onClick = { clearSelection() }) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Close selection")
+                            Icon(Icons.Default.Close, contentDescription = "Close selection")
                         }
                     },
                     title = { Text("${selectedIds.size} selected") },
                     actions = {
                         val selectedCount = selectedIds.size
+
+                        // --- PIN / UNPIN ---
+                        val allSelectedArePinned = selectedIds.isNotEmpty() && chatSummaries.filter { selectedIds.contains(it.id) }.all { it.isPinned }
+                        IconButton(onClick = {
+                            selectedIds.forEach { chatId ->
+                                if (allSelectedArePinned) {
+                                    viewModel.unpinChat(chatId)
+                                } else {
+                                    viewModel.pinChat(chatId)
+                                }
+                            }
+                            Toast.makeText(context, if (allSelectedArePinned) "Unpinned" else "Pinned", Toast.LENGTH_SHORT).show()
+                            clearSelection()
+                        }) {
+                            Icon(Icons.Default.PushPin, contentDescription = if (allSelectedArePinned) "Unpin" else "Pin")
+                        }
 
                         // --- MUTE with options (1 hour, 12 hours, forever) ---
                         var muteMenu by remember { mutableStateOf(false) }
@@ -339,7 +340,7 @@ fun ChatListScreen(
                                     text = { Text("Mute Forever") },
                                     onClick = { applyMuteFor(null) }
                                 )
-                                Divider()
+                                HorizontalDivider()
                                 DropdownMenuItem(
                                     text = { Text("Unmute") },
                                     onClick = { applyMuteFor(0L) }
@@ -388,28 +389,11 @@ fun ChatListScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Image(painterResource(R.drawable.logo2), null, Modifier.height(40.dp))
-                            var expanded by remember { mutableStateOf(false) }
-                            Box {
-                                IconButton(onClick = { expanded = true }) {
-                                    Icon(Icons.Default.MoreVert, null)
-                                }
-                                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                                    DropdownMenuItem(
-                                        text = { Text("Archived") },
-                                        onClick = {
-                                            expanded = false
-                                            context.startActivity(
-                                                Intent(context, com.abdallah.cnnct.settings.view.ArchiveSettingsActivity::class.java)
-                                            )
-                                        }
-                                    )
-                                    // Settings removed (now a Tab)
-
-                                    DropdownMenuItem(
-                                        text = { Text("Logout") },
-                                        onClick = { expanded = false; onLogout() }
-                                    )
-                                }
+                            IconButton(onClick = {
+                                context.startActivity(Intent(context, com.abdallah.cnnct.settings.view.SettingsActivity::class.java))
+                            }) {
+                                val currentUserPhoto = uiState.currentUserProfileUrl
+                                UserAvatar(photoUrl = currentUserPhoto, size = 32.dp, contentDescription = "Settings")
                             }
                         }
                     }
@@ -489,7 +473,7 @@ fun ChatListScreen(
                                 }
                                 Text("Start", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
                             }
-                            Divider()
+                            HorizontalDivider()
                         }
                         if (userSearchResults.isEmpty()) {
                             item {
@@ -500,35 +484,69 @@ fun ChatListScreen(
                         }
                     }
                 }
-                Divider(thickness = 1.dp)
+                HorizontalDivider(thickness = 1.dp)
             }
 
-            // Chat list
-            ChatListView(
-                chatSummaries = chatSummaries,
-                searchQuery = searchQuery,
-                userMap = userMap,
-                userPhotoMap = userPhotoMap,
-                userPhoneMap = userPhoneMap,
-                onlineMap = onlineMap,
-                currentUserId = currentUserId,
-                selectionMode = selectionMode,
-                isSelected = { id -> selectedIds.contains(id) },
-                onLongPress = { id ->
-                    if (!selectionMode) selectionMode = true
-                    toggleSelect(id)
-                },
-                onOpen = { chatId ->
-                    if (selectionMode) {
-                        toggleSelect(chatId)
-                    } else {
-                        onChatClick(chatId)
+            if (presenceState is ComponentState.Error) {
+                InlineErrorCard(
+                    what = presenceState.what,
+                    why = presenceState.why,
+                    actionText = presenceState.actionText,
+                    onRetry = { /* Presence auto-retries on flow recreation */ },
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
+
+            when (chatListState) {
+                is ComponentState.Loading -> {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        repeat(8) { ChatListItemSkeleton() }
                     }
-                },
-                blockedPeers = blockedPeers,
-                // this lambda lets rows render a mute badge and will recompose when muteVersion changes
-                isMuted = { chatId -> muteVersion /* read to subscribe */; MuteStore.isMuted(chatId) }
-            )
+                }
+                is ComponentState.Error -> {
+                    InlineErrorCard(
+                        what = chatListState.what,
+                        why = chatListState.why,
+                        actionText = chatListState.actionText,
+                        onRetry = { /* Implement refresh trigger if needed */ },
+                        modifier = Modifier.padding(16.dp)
+                    )
+                }
+                is ComponentState.Success -> {
+                    ChatListView(
+                        chatSummaries = chatSummaries,
+                        searchQuery = searchQuery,
+                        userMap = userMap,
+                        userPhotoMap = userPhotoMap,
+                        userPhoneMap = userPhoneMap,
+                        onlineMap = onlineMap,
+                        currentUserId = currentUserId,
+                        selectionMode = selectionMode,
+                        isSelected = { id -> selectedIds.contains(id) },
+                        onLongPress = { id ->
+                            if (!selectionMode) selectionMode = true
+                            toggleSelect(id)
+                        },
+                        onOpen = { chatId ->
+                            if (selectionMode) {
+                                toggleSelect(chatId)
+                            } else {
+                                onChatClick(chatId)
+                            }
+                        },
+                        blockedPeers = blockedPeers,
+                        isMuted = { chatId -> muteVersion; MuteStore.isMuted(chatId) },
+                        onClearSearch = { searchQuery = "" },
+                        onStartChat = {
+                            showUserPicker = true
+                            scope.launch {
+                                delay(50)
+                                keyboardController?.show()
+                            }
+                        }
+                    )
+                }
+            }
         }
     }
 
@@ -659,7 +677,9 @@ fun ChatListView(
     onLongPress: (String) -> Unit,
     onOpen: (String) -> Unit,
     blockedPeers: Set<String>,
-    isMuted: (String) -> Boolean
+    isMuted: (String) -> Boolean,
+    onClearSearch: () -> Unit,
+    onStartChat: () -> Unit
 ) {
     val filtered = chatSummaries.filter { chat ->
         if (searchQuery.isBlank()) true else {
@@ -676,7 +696,13 @@ fun ChatListView(
     }
 
     if (filtered.isEmpty()) {
-        Box(Modifier.fillMaxSize(), Alignment.Center) { Text("No chats found") }
+        ActionableEmptyState(
+            icon = Icons.Default.Chat,
+            title = if (searchQuery.isBlank()) "No chats yet" else "No matches found",
+            description = if (searchQuery.isBlank()) "Start a new conversation to connect with others." else "No chats matched your search query.",
+            actionText = if (searchQuery.isBlank()) "Start a Chat" else "Clear Search",
+            onActionClick = { if (searchQuery.isBlank()) onStartChat() else onClearSearch() }
+        )
     } else {
         LazyColumn {
             items(filtered, key = { it.id }) { chat ->
@@ -700,14 +726,17 @@ fun ChatListView(
                         .fillMaxWidth()
                         .combinedClickable(
                             onClick = {
-                                // 🛠️ FIX: If private chat has legacy ID (no '#'), redirect to canonical
-                                val finalId = if (chat.type == "private" && !chat.id.contains("#") && other != null) {
-                                    val (a, b) = listOf(currentUserId, other).sorted()
-                                    "priv_$a#$b"
+                                if (selectionMode) {
+                                    onLongPress(chat.id)
                                 } else {
-                                    chat.id
+                                    val finalId = if (chat.type == "private" && !chat.id.contains("#") && other != null) {
+                                        val (a, b) = listOf(currentUserId, other).sorted()
+                                        "priv_$a#$b"
+                                    } else {
+                                        chat.id
+                                    }
+                                    onOpen(finalId)
                                 }
-                                onOpen(finalId)
                             },
                             onLongClick = { onLongPress(chat.id) }
                         )
@@ -723,7 +752,8 @@ fun ChatListView(
                         photoUrl = photoUrlForRow,
                         selectionMode = selectionMode,
                         selected = isSelected(chat.id),
-                        muted = isMuted(chat.id)
+                        muted = isMuted(chat.id),
+                        pinned = chat.isPinned
                     )
                 }
             }

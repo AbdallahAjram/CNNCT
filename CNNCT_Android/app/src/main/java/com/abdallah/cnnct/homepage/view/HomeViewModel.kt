@@ -7,19 +7,17 @@ import com.cnnct.chat.mvc.model.ChatRepository
 import com.abdallah.cnnct.chat.core.repository.UserRepository
 import com.abdallah.cnnct.homepage.model.ChatSummary
 import com.abdallah.cnnct.settings.model.UserProfile
+import com.abdallah.cnnct.common.state.ComponentState
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 data class HomeUiState(
-    val chats: List<ChatSummary> = emptyList(),
-    val archivedChats: List<ChatSummary> = emptyList(),
-    val loading: Boolean = true,
-    val error: String? = null,
-    
-    // Search
-    val searchResults: List<UserProfile> = emptyList(),
+    val chatListState: ComponentState<Pair<List<ChatSummary>, List<ChatSummary>>> = ComponentState.Loading,
+    val searchState: ComponentState<List<UserProfile>> = ComponentState.Success(emptyList()),
+    val presenceState: ComponentState<Map<String, Long?>> = ComponentState.Success(emptyMap()),
     val isSearching: Boolean = false,
-    val searchError: String? = null
+    val currentUserProfileUrl: String? = null
 )
 
 class HomeViewModel(
@@ -34,11 +32,23 @@ class HomeViewModel(
 
     init {
         if (currentUserId.isNotBlank()) {
+            observeMyProfile()
             observeChats()
+            observePresence()
             startDeliveryPolling()
             viewModelScope.launch { userRepo.ensureSearchName() }
         } else {
-            _uiState.update { it.copy(loading = false, error = "Not signed in") }
+            _uiState.update { it.copy(chatListState = ComponentState.Error("Not signed in", "Auth Error", "Retry")) }
+        }
+    }
+
+    private fun observeMyProfile() {
+        viewModelScope.launch {
+            userRepo.listenMyProfile().collect { profile ->
+                val authPhoto = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.photoUrl?.toString()
+                val resolvedUrl = profile?.photoUrl ?: authPhoto
+                _uiState.update { it.copy(currentUserProfileUrl = resolvedUrl) }
+            }
         }
     }
 
@@ -80,6 +90,7 @@ class HomeViewModel(
                 }
 
                 // Attach meta flags for filtering context if needed (though we filter below)
+                maskedChat.isPinned = meta?.pinned == true
                 maskedChat
             }
             
@@ -99,9 +110,10 @@ class HomeViewModel(
                 } else {
                     !isHidden && !isArchived
                 }
-            }.sortedByDescending { 
-                it.lastMessageTimestamp?.toDate()?.time ?: it.createdAt?.toDate()?.time ?: 0L 
-            }
+            }.sortedWith(
+                compareByDescending<ChatSummary> { it.isPinned }
+                    .thenByDescending { it.lastMessageTimestamp?.toDate()?.time ?: it.createdAt?.toDate()?.time ?: 0L }
+            )
 
             val archivedChats = processed.filter { chat ->
                 val meta = metaMap[chat.id]
@@ -114,32 +126,57 @@ class HomeViewModel(
 
             Pair(homeChats, archivedChats)
         }.onEach { (home, archived) ->
-            _uiState.update { it.copy(chats = home, archivedChats = archived, loading = false, error = null) }
+            _uiState.update { it.copy(chatListState = ComponentState.Success(Pair(home, archived))) }
         }.flowOn(kotlinx.coroutines.Dispatchers.Default).catch { e ->
-            _uiState.update { it.copy(error = e.message) }
+            _uiState.update { it.copy(chatListState = ComponentState.Error("Unable to load chats", e.message ?: "Connection lost", "Retry")) }
         }.launchIn(viewModelScope)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun observePresence() {
+        _uiState.map { it.chatListState }
+            .distinctUntilChanged()
+            .flatMapLatest { state ->
+                if (state is ComponentState.Success) {
+                    val allChats = state.data.first + state.data.second
+                    val targets = allChats
+                        .flatMap { it.members + (it.lastMessageSenderId ?: "") }
+                        .filter { it.isNotBlank() && it != currentUserId }
+                        .distinct()
+                    
+                    userRepo.listenPresence(targets)
+                        .map { ComponentState.Success(it) as ComponentState<Map<String, Long?>> }
+                        .catch { e -> emit(ComponentState.Error("Presence offline", e.message ?: "Network error", "Retry")) }
+                } else {
+                    flowOf(ComponentState.Success(emptyMap()))
+                }
+            }
+            .onEach { presence ->
+                _uiState.update { it.copy(presenceState = presence) }
+            }
+            .launchIn(viewModelScope)
     }
 
     // ========== Actions ==========
 
     fun searchUsers(query: String) {
         if (query.isBlank()) {
-            _uiState.update { it.copy(searchResults = emptyList(), isSearching = false) }
+            _uiState.update { it.copy(searchState = ComponentState.Success(emptyList()), isSearching = false) }
             return
         }
-        _uiState.update { it.copy(isSearching = true, searchError = null) }
+        _uiState.update { it.copy(isSearching = true, searchState = ComponentState.Loading) }
         viewModelScope.launch {
             try {
                 val results = userRepo.searchUsers(query)
-                _uiState.update { it.copy(searchResults = results, isSearching = false) }
+                _uiState.update { it.copy(searchState = ComponentState.Success(results), isSearching = false) }
             } catch (e: Exception) {
-                _uiState.update { it.copy(searchError = e.message, isSearching = false) }
+                _uiState.update { it.copy(searchState = ComponentState.Error("Search failed", e.message ?: "Network issue", "Retry"), isSearching = false) }
             }
         }
     }
     
     fun clearSearchResults() {
-         _uiState.update { it.copy(searchResults = emptyList(), isSearching = false, searchError = null) }
+         _uiState.update { it.copy(searchState = ComponentState.Success(emptyList()), isSearching = false) }
     }
 
     fun muteChat(chatId: String) = viewModelScope.launch {
@@ -160,6 +197,14 @@ class HomeViewModel(
     
     fun unarchiveChat(chatId: String) = viewModelScope.launch {
         chatRepo.setArchived(currentUserId, chatId, false)
+    }
+
+    fun pinChat(chatId: String) = viewModelScope.launch {
+        chatRepo.setPinned(currentUserId, chatId, true)
+    }
+
+    fun unpinChat(chatId: String) = viewModelScope.launch {
+        chatRepo.setPinned(currentUserId, chatId, false)
     }
 
     fun deleteChatForMe(chatId: String) = viewModelScope.launch {

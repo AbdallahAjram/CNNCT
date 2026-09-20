@@ -21,6 +21,7 @@ import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.abdallah.cnnct.R
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
+import com.abdallah.cnnct.ui.theme.CNNCTTheme
 
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -42,6 +43,7 @@ class LoginActivity : ComponentActivity() {
         googleSignInClient = GoogleSignIn.getClient(this, gso)
 
         setContent {
+            CNNCTTheme {
             val navController = rememberNavController()
             val state by viewModel.uiState.collectAsState()
             val currentUser by viewModel.currentUser.collectAsState()
@@ -108,6 +110,7 @@ class LoginActivity : ComponentActivity() {
                         },
                         isLoading = state is AuthUiState.Loading
                     )
+                }
                 }
             }
         }

@@ -8,7 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Group
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -21,7 +21,7 @@ import com.abdallah.cnnct.auth.view.LoginActivity
 import com.abdallah.cnnct.calls.view.IncomingCallActivity
 import com.abdallah.cnnct.calls.view.CallsScreen
 import com.abdallah.cnnct.groups.view.GroupScreen
-import com.abdallah.cnnct.settings.view.SettingsScreen
+import com.abdallah.cnnct.groups.view.GroupScreen
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
 import androidx.activity.compose.BackHandler
@@ -35,8 +35,7 @@ fun MainPagerScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    // 4 pages: Chats, Groups, Calls, Settings
-    val pagerState = rememberPagerState(pageCount = { 4 })
+    val pagerState = rememberPagerState(pageCount = { 3 })
     
     // Incoming Call Logic (Moved from HomeScreen)
     val callsUiState by callsViewModel.uiState.collectAsState()
@@ -107,7 +106,9 @@ fun MainPagerScreen(
 
     Scaffold(
         bottomBar = {
-            NavigationBar {
+            NavigationBar(
+                tonalElevation = 8.dp
+            ) {
                 val current = pagerState.currentPage
                 NavigationBarItem(
                     icon = { Icon(Icons.Default.Chat, "Chats") },
@@ -126,12 +127,6 @@ fun MainPagerScreen(
                     label = { Text("Calls") },
                     selected = current == 2,
                     onClick = { scope.launch { pagerState.scrollToPage(2) } }
-                )
-                NavigationBarItem(
-                    icon = { Icon(Icons.Default.Settings, "Settings") },
-                    label = { Text("Settings") },
-                    selected = current == 3,
-                    onClick = { scope.launch { pagerState.scrollToPage(3) } }
                 )
             }
         }
@@ -156,20 +151,6 @@ fun MainPagerScreen(
                         }
                     )
                     2 -> CallsScreen(viewModel = callsViewModel)
-                    3 -> SettingsScreen(
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 16.dp), // or 0.dp
-                        onBackClick = { /* No-op or switch tab? Pager usually doesn't back out */ },
-                        onNavigate = { dest ->
-                           when(dest) {
-                               "Account" -> context.startActivity(Intent(context, com.abdallah.cnnct.settings.view.AccountActivity::class.java))
-                               "Privacy" -> context.startActivity(Intent(context, com.abdallah.cnnct.settings.view.PrivacySettingsActivity::class.java))
-                               "Notifications" -> context.startActivity(Intent(context, com.abdallah.cnnct.notifications.view.NotificationSettingsActivity::class.java))
-                               "Archived Chats" -> context.startActivity(Intent(context, com.abdallah.cnnct.settings.view.ArchiveSettingsActivity::class.java))
-                               "Blocked Accounts" -> context.startActivity(Intent(context, com.abdallah.cnnct.settings.view.BlockedSettingsActivity::class.java))
-                               else -> {}
-                           }
-                        }
-                    ) 
                 }
             }
         }

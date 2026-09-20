@@ -588,7 +588,7 @@ fun ChatScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .imePadding()
-                .background(Color(0xFFF1EAF5))
+                .background(MaterialTheme.colorScheme.background)
         ) {
             Column(Modifier.fillMaxSize()) {
                 // Banners (top of list)
@@ -690,23 +690,24 @@ fun ChatScreen(
                                             Text(
                                                 text = nameOf(m.senderId),
                                                 style = MaterialTheme.typography.labelMedium,
-                                                color = Color(0xFF6B7280),
+                                                color = MaterialTheme.colorScheme.outline,
                                                 modifier = Modifier.padding(bottom = 2.dp, start = 4.dp, end = 4.dp)
                                             )
                                         }
 
                                         val bubbleColor = when {
-                                            isCurrentSearchMatch -> Color(0xFFCCE5FF)
-                                            isSearchMatch -> Color(0xFFEAF3FF)
+                                            isCurrentSearchMatch -> MaterialTheme.colorScheme.tertiaryContainer
+                                            isSearchMatch -> MaterialTheme.colorScheme.secondaryContainer
                                             m.deleted -> MaterialTheme.colorScheme.surfaceVariant
-                                            me -> Color(0xFF7A3EB1)
-                                            else -> Color(0xFF2D7FF9)
+                                            me -> MaterialTheme.colorScheme.primary
+                                            else -> MaterialTheme.colorScheme.primaryContainer
                                         }
 
                                         val textColor = when {
-                                            isCurrentSearchMatch || isSearchMatch -> Color.Black
+                                            isCurrentSearchMatch || isSearchMatch -> MaterialTheme.colorScheme.onSurface
                                             m.deleted -> MaterialTheme.colorScheme.onSurfaceVariant
-                                            else -> Color.White
+                                            me -> MaterialTheme.colorScheme.onPrimary
+                                            else -> MaterialTheme.colorScheme.onPrimaryContainer
                                         }
 
                                         val shape = bubbleShapeInBlock(isMe = me, idx = 0, lastIdx = 0)

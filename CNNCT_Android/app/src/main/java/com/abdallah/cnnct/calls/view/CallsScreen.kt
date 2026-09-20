@@ -34,15 +34,12 @@ fun CallsScreen(
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("Call Logs") },
-                navigationIcon = {
+                actions = {
+                    val context = LocalContext.current
                     IconButton(onClick = {
-                        if (onBack != null) onBack()
-                        else (context as? ComponentActivity)?.finish()
+                        context.startActivity(android.content.Intent(context, com.abdallah.cnnct.settings.view.SettingsActivity::class.java))
                     }) {
-                        Icon(
-                            imageVector = Icons.Default.ArrowBack,
-                            contentDescription = "Back"
-                        )
+                        com.abdallah.cnnct.common.view.UserAvatar(photoUrl = state.currentUserProfileUrl, size = 32.dp, contentDescription = "Settings")
                     }
                 }
             )
@@ -50,15 +47,11 @@ fun CallsScreen(
     ) { padding ->
         Box(modifier = modifier.fillMaxSize().padding(padding).padding(16.dp)) {
             if (logs.isEmpty()) {
-                Column(
-                    Modifier.fillMaxSize(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Icon(Icons.Filled.Call, contentDescription = null, modifier = Modifier.size(64.dp))
-                    Spacer(Modifier.height(8.dp))
-                    Text("No calls yet", style = MaterialTheme.typography.bodyLarge)
-                }
+                com.abdallah.cnnct.ui.components.ActionableEmptyState(
+                    icon = Icons.Filled.Call,
+                    title = "No Calls Yet",
+                    description = "Your recent calls will appear here."
+                )
             } else {
                 LazyColumn {
                     items(logs.size, key = { logs[it].log.callId }) { i ->

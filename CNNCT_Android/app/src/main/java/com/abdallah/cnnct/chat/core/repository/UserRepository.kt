@@ -8,6 +8,8 @@ import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
 
 class UserRepository(
@@ -19,6 +21,24 @@ class UserRepository(
     suspend fun getUser(uid: String): UserProfile {
         val d = db.collection("users").document(uid).get().await()
         return d.toObject(UserProfile::class.java) ?: UserProfile(uid, "Unknown")
+    }
+
+    fun listenMyProfile(): kotlinx.coroutines.flow.Flow<UserProfile?> = kotlinx.coroutines.flow.callbackFlow {
+        val uid = try { me() } catch(e: Exception) { "" }
+        if (uid.isBlank()) {
+            trySend(null)
+            close()
+            return@callbackFlow
+        }
+        val reg = db.collection("users").document(uid)
+            .addSnapshotListener { snap, e ->
+                if (e != null || snap == null) {
+                    trySend(null)
+                    return@addSnapshotListener
+                }
+                trySend(snap.toObject(UserProfile::class.java))
+            }
+        awaitClose { reg.remove() }
     }
 
     suspend fun ensureSearchName() {
@@ -192,5 +212,33 @@ class UserRepository(
             "createdAt" to FieldValue.serverTimestamp()
         )
         db.collection("reports").add(report).await()
+    }
+
+    fun listenPresence(uids: List<String>): Flow<Map<String, Long?>> = callbackFlow {
+        if (uids.isEmpty()) {
+            trySend(emptyMap())
+            return@callbackFlow
+        }
+        val chunks = uids.distinct().chunked(10)
+        val regs = mutableListOf<com.google.firebase.firestore.ListenerRegistration>()
+        val currentMap = mutableMapOf<String, Long?>()
+
+        for (chunk in chunks) {
+            val reg = db.collection("users")
+                .whereIn(FieldPath.documentId(), chunk)
+                .addSnapshotListener { snap, err ->
+                    if (err != null || snap == null) return@addSnapshotListener
+                    for (doc in snap.documents) {
+                        val ts = doc.getTimestamp("lastOnlineAt")?.toDate()?.time
+                        currentMap[doc.id] = ts
+                    }
+                    trySend(currentMap.toMap())
+                }
+            regs.add(reg)
+        }
+
+        awaitClose {
+            regs.forEach { it.remove() }
+        }
     }
 }

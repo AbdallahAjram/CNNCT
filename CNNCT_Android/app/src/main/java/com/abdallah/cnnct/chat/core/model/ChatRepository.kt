@@ -80,6 +80,7 @@ interface ChatRepository {
 
     suspend fun setChatMutedUntil(userId: String, chatId: String, mutedUntilMs: Long?)
     suspend fun setArchived(userId: String, chatId: String, archived: Boolean)
+    suspend fun setPinned(userId: String, chatId: String, pinned: Boolean)
     suspend fun promoteIncomingLastMessagesToDelivered(userId: String, maxPerRun: Int = 25)
 
     suspend fun muteChatForHours(userId: String, chatId: String, hours: Long)

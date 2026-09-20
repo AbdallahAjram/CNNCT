@@ -47,13 +47,7 @@ import com.abdallah.cnnct.settings.viewmodel.AccountViewModel
 import kotlinx.coroutines.launch
 import com.abdallah.cnnct.R
 
-// Palette
-private val Lavender = Color(0xFFF1EAF5)
-private val FieldGray = Color(0xFFD1D5DB)
-private val TextBlack = Color(0xFF111827)
-private val AccentGreen = Color(0xFF34C799)
-private val FooterGray = Color(0xFF6B7280)
-
+// Replaced hardcoded palette with MaterialTheme and CNNCTTheme tokens
 /* ------------------------ Wrapper (Stateful) ------------------------ */
 
 @Composable
@@ -194,7 +188,7 @@ fun AccountScreenContent(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Lavender)
+            .background(MaterialTheme.colorScheme.background)
             .padding(contentPadding)
             .padding(horizontal = 16.dp, vertical = 12.dp)
             .pointerInput(Unit) { detectTapGestures { focusManager.clearFocus() } },
@@ -211,7 +205,7 @@ fun AccountScreenContent(
                     modifier = Modifier
                         .size(110.dp)
                         .clip(CircleShape)
-                        .background(FieldGray),
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center
                 ) {
                     val photoUrl = p.photoUrl
@@ -233,7 +227,7 @@ fun AccountScreenContent(
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = "Edit photo",
-                    color = AccentGreen,
+                    color = MaterialTheme.colorScheme.primary,
                     fontSize = 14.sp,
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
@@ -251,7 +245,7 @@ fun AccountScreenContent(
                 LabeledField("Display name") {
                     EditableBubble(
                         value = nameText,
-                        onValueChange = { nameText = it },
+                        onValueChange = { if (it.length <= 30) nameText = it },
                         isEditing = nameEditing,
                         canSave = nameText.isNotBlank() && nameText != nameOriginal,
                         onStartEdit = {
@@ -274,7 +268,8 @@ fun AccountScreenContent(
                             keyboardController?.hide()
                             focusManager.clearFocus()
                         },
-                        focusRequester = nameFocusRequester
+                        focusRequester = nameFocusRequester,
+                        charLimit = 30
                     )
                 }
 
@@ -284,7 +279,7 @@ fun AccountScreenContent(
                 LabeledField("About") {
                     EditableBubble(
                         value = aboutText,
-                        onValueChange = { aboutText = it },
+                        onValueChange = { if (it.length <= 120) aboutText = it },
                         isEditing = aboutEditing,
                         canSave = aboutText != aboutOriginal,
                         onStartEdit = {
@@ -307,7 +302,8 @@ fun AccountScreenContent(
                             keyboardController?.hide()
                             focusManager.clearFocus()
                         },
-                        focusRequester = aboutFocusRequester
+                        focusRequester = aboutFocusRequester,
+                        charLimit = 120
                     )
                 }
 
@@ -316,7 +312,7 @@ fun AccountScreenContent(
                 // Privacy & Security moved to Privacy Screen
 
                 Spacer(Modifier.weight(1f))
-                Text("CNNCT© 2026", color = FooterGray, fontSize = 12.sp)
+                Text("CNNCT© 2026", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             }
         }
     }
@@ -325,7 +321,7 @@ fun AccountScreenContent(
 @Composable
 private fun LabeledField(label: String, content: @Composable () -> Unit) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        Text(label, color = TextBlack, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        Text(label, color = MaterialTheme.colorScheme.onBackground, fontSize = 14.sp, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(6.dp))
         content()
     }
@@ -336,10 +332,10 @@ private fun ReadOnlyBubble(text: String) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(FieldGray, RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
             .padding(horizontal = 16.dp, vertical = 14.dp)
     ) {
-        Text(text, color = TextBlack, fontSize = 16.sp)
+        Text(text, color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp)
     }
 }
 
@@ -352,49 +348,58 @@ private fun EditableBubble(
     onStartEdit: () -> Unit,
     onSave: () -> Unit,
     onCancel: () -> Unit,
-    focusRequester: FocusRequester
+    focusRequester: FocusRequester,
+    charLimit: Int
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(FieldGray, RoundedCornerShape(12.dp))
-            .padding(start = 12.dp, end = 8.dp)
-            .heightIn(min = 48.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            readOnly = !isEditing,
-            singleLine = true,
+    Column {
+        Row(
             modifier = Modifier
-                .weight(1f)
-                .padding(vertical = 4.dp)
-                .focusRequester(focusRequester)
-                .onFocusChanged { state ->
-                    // Removed auto-cancel on focus loss to prevent state races.
-                    // Accessing 'isEditing' here captures the initial state of the lambda, 
-                    // or if it captures the state ref, it might still be flaky if focus clears during save.
-                },
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { if (canSave) onSave() else onCancel() }),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = FieldGray,
-                unfocusedContainerColor = FieldGray,
-                disabledContainerColor = FieldGray,
-                focusedTextColor = TextBlack,
-                unfocusedTextColor = TextBlack,
-                disabledTextColor = TextBlack,
-                focusedBorderColor = Color.Transparent,
-                unfocusedBorderColor = Color.Transparent,
-                disabledBorderColor = Color.Transparent
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+                .padding(start = 12.dp, end = 8.dp)
+                .heightIn(min = 48.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                readOnly = !isEditing,
+                singleLine = true,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(vertical = 4.dp)
+                    .focusRequester(focusRequester)
+                    .onFocusChanged { state ->
+                    },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { if (canSave) onSave() else onCancel() }),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                    focusedBorderColor = Color.Transparent,
+                    unfocusedBorderColor = Color.Transparent,
+                    disabledBorderColor = Color.Transparent
+                )
             )
-        )
-        IconButton(onClick = { if (isEditing) { if (canSave) onSave() else onCancel() } else onStartEdit() }) {
-            Icon(
-                imageVector = if (isEditing) Icons.Default.Check else Icons.Default.Edit,
-                contentDescription = if (isEditing) "Save" else "Edit",
-                tint = if (isEditing && canSave) AccentGreen else AccentGreen.copy(alpha = if (isEditing) 0.5f else 1f)
+            IconButton(onClick = { if (isEditing) { if (canSave) onSave() else onCancel() } else onStartEdit() }) {
+                Icon(
+                    imageVector = if (isEditing) Icons.Default.Check else Icons.Default.Edit,
+                    contentDescription = if (isEditing) "Save" else "Edit",
+                    tint = if (isEditing && canSave) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = if (isEditing) 0.5f else 1f)
+                )
+            }
+        }
+        if (isEditing) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "${value.length}/$charLimit",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.align(Alignment.End)
             )
         }
     }

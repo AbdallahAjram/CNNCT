@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.NotificationsOff
@@ -40,7 +41,8 @@ fun ArchiveScreen(
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: ""
 
     val uiState by viewModel.uiState.collectAsState()
-    val chatSummaries = uiState.archivedChats
+    val chatListState = uiState.chatListState
+    val chatSummaries = if (chatListState is com.abdallah.cnnct.common.state.ComponentState.Success) chatListState.data.second else emptyList()
 
     var userMap by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var userPhotoMap by remember { mutableStateOf<Map<String, String?>>(emptyMap()) }
@@ -173,7 +175,7 @@ fun ArchiveScreen(
                                 }
 
                                 DropdownMenuItem(text = { Text("Mute forever") }, onClick = { applyMuteFor(null) })
-                                Divider()
+                                HorizontalDivider()
                                 DropdownMenuItem(text = { Text("Unmute") }, onClick = { applyMuteFor(0L) })
                             }
                         }
@@ -205,7 +207,11 @@ fun ArchiveScreen(
     ) { padding ->
         if (chatSummaries.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text("No archived chats")
+                com.abdallah.cnnct.ui.components.ActionableEmptyState(
+                    icon = androidx.compose.material.icons.Icons.Default.Archive,
+                    title = "No Archived Chats",
+                    description = "Your archived chats will appear here."
+                )
             }
         } else {
             LazyColumn(Modifier.padding(padding)) {

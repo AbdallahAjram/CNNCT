@@ -31,5 +31,6 @@ data class ChatSummary(
 
     // 🔵 Computed locally (not persisted): badge count for unread on Home row.
     // With the current data model, this will effectively be 0 or 1.
-    var unreadCount: Int = 0
+    var unreadCount: Int = 0,
+    var isPinned: Boolean = false
 )

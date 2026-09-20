@@ -81,20 +81,30 @@ fun CompleteProfileScreen(
 
                 OutlinedTextField(
                     value = name,
-                    onValueChange = { name = it },
+                    onValueChange = { if (it.length <= 30) name = it },
                     label = { Text("Full Name") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = !isLoading
+                    enabled = !isLoading,
+                    supportingText = { 
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            Text("${name.length}/30")
+                        }
+                    }
                 )
 
                 OutlinedTextField(
                     value = displayName,
-                    onValueChange = { displayName = it },
+                    onValueChange = { if (it.length <= 30) displayName = it },
                     label = { Text("Display Name") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = !isLoading
+                    enabled = !isLoading,
+                    supportingText = { 
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            Text("${displayName.length}/30")
+                        }
+                    }
                 )
 
                 Row(

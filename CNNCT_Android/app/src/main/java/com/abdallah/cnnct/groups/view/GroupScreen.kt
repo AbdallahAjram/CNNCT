@@ -18,7 +18,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -41,6 +41,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.rememberAsyncImagePainter
@@ -114,11 +115,19 @@ fun GroupScreenContent(
                             modifier = Modifier.height(40.dp)
                         )
                         Text(text = "Groups", style = MaterialTheme.typography.titleLarge)
-                        IconButton(onClick = {
-                            focusRequester.requestFocus()
-                            keyboardController?.show()
-                        }) {
-                            Icon(Icons.Default.Search, contentDescription = "Search")
+                        Row {
+                            IconButton(onClick = {
+                                focusRequester.requestFocus()
+                                keyboardController?.show()
+                            }) {
+                                Icon(Icons.Default.Search, contentDescription = "Search")
+                            }
+                            val context = LocalContext.current
+                            IconButton(onClick = {
+                                context.startActivity(android.content.Intent(context, com.abdallah.cnnct.settings.view.SettingsActivity::class.java))
+                            }) {
+                                UserAvatar(photoUrl = state.currentUserProfileUrl, size = 32.dp, contentDescription = "Settings")
+                            }
                         }
                     }
                 }
@@ -284,7 +293,7 @@ private fun GroupListItem(
                             ?: if (chatSummary.lastMessageIsRead) "read" else "delivered"
 
                         val (ticks, color) = when (effectiveStatus) {
-                            "read"      -> "✓✓" to Color(0xFF34B7F1)
+                            "read"      -> "✓✓" to com.abdallah.cnnct.ui.theme.ReadReceiptBlue
                             "delivered" -> "✓✓" to MaterialTheme.colorScheme.onSurfaceVariant
                             "sent"      -> "✓"  to MaterialTheme.colorScheme.onSurfaceVariant
                             else        -> null  to MaterialTheme.colorScheme.onSurfaceVariant
@@ -324,18 +333,10 @@ private fun CreateGroupSheet(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
-    // To handle one-time events (navigation / toast) based on state changes
     LaunchedEffect(state.createdChatId) {
         state.createdChatId?.let { chatId ->
             onCreatedOpen(chatId)
             vm.resetCreatedChatId()
-        }
-    }
-
-    LaunchedEffect(state.error) {
-        state.error?.let { err ->
-            Toast.makeText(context, "Error: $err", Toast.LENGTH_LONG).show()
-            vm.clearError()
         }
     }
 
@@ -382,14 +383,22 @@ private fun CreateGroupSheet(
 
             // Name & Desc
             OutlinedTextField(
-                value = groupName, onValueChange = { groupName = it },
+                value = groupName, 
+                onValueChange = { 
+                    if (it.length <= 30) groupName = it else groupName = it.substring(0, 30) 
+                },
                 label = { Text("Group name") },
+                supportingText = { Text("${groupName.length}/30", textAlign = TextAlign.End, modifier = Modifier.fillMaxWidth()) },
                 singleLine = true, modifier = Modifier.fillMaxWidth()
             )
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
-                value = groupDesc, onValueChange = { groupDesc = it },
+                value = groupDesc, 
+                onValueChange = { 
+                    if (it.length <= 50) groupDesc = it else groupDesc = it.substring(0, 50) 
+                },
                 label = { Text("Description (optional)") },
+                supportingText = { Text("${groupDesc.length}/50", textAlign = TextAlign.End, modifier = Modifier.fillMaxWidth()) },
                 singleLine = false, minLines = 2, modifier = Modifier.fillMaxWidth()
             )
             Spacer(Modifier.height(8.dp))
@@ -450,12 +459,21 @@ private fun CreateGroupSheet(
                                 user.phone?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                             }
                         }
-                        Divider()
+                        HorizontalDivider()
                     }
                 }
             }
 
             Spacer(Modifier.height(16.dp))
+
+            if (state.error != null) {
+                Text(
+                    text = state.error!!,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+            }
 
             // Buttons
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

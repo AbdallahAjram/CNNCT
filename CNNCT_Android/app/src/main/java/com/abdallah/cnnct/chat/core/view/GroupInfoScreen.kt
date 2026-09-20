@@ -436,19 +436,29 @@ fun EditGroupDialog(
             Column {
                 OutlinedTextField(
                     value = nameText,
-                    onValueChange = { nameText = it },
+                    onValueChange = { if (it.length <= 25) nameText = it },
                     label = { Text("Group name") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    supportingText = {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            Text("${nameText.length}/25")
+                        }
+                    }
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = descText,
-                    onValueChange = { descText = it },
+                    onValueChange = { if (it.length <= 50) descText = it },
                     label = { Text("Description (optional)") },
                     singleLine = false,
                     minLines = 2,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    supportingText = {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            Text("${descText.length}/50")
+                        }
+                    }
                 )
             }
         },

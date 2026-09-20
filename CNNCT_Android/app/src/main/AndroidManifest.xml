@@ -86,6 +86,9 @@
 
 
 
+        <activity
+            android:name=".settings.view.SettingsActivity"
+            android:exported="false" />
 
         <activity
             android:name=".settings.view.AccountActivity"

@@ -169,10 +169,11 @@ fun AvatarWithStatus(
     presence: Presence,
     photoUrl: String? = null
 ) {
+    val customColors = com.abdallah.cnnct.ui.theme.LocalCustomColors.current
     val dotColor = when (presence) {
-        Presence.Blocked -> Color(0xFFFF3B30)  // red
-        Presence.Online  -> Color(0xFF34C759)  // green
-        Presence.Offline -> Color(0xFF9CA3AF)  // gray
+        Presence.Blocked -> customColors.presenceBlocked
+        Presence.Online  -> customColors.presenceOnline
+        Presence.Offline -> customColors.presenceOffline
     }
 
     Box(
@@ -230,10 +231,10 @@ fun DayDivider(label: String) {
 @Composable
 fun Ticks(sent: Boolean, delivered: Boolean, read: Boolean) {
     val color = when {
-        read -> Color(0xFF34B7F1) // Blue when read
-        delivered -> Color.Gray // when delivered but not read
-        sent -> Color.Gray // Gray when just sent
-        else -> Color.Gray.copy(alpha = 0.4f) // Very light gray when not sent
+        read -> com.abdallah.cnnct.ui.theme.ReadReceiptBlue
+        delivered -> Color.Gray
+        sent -> Color.Gray
+        else -> Color.Gray.copy(alpha = 0.4f)
     }
     val text = when {
         read -> "✓✓"

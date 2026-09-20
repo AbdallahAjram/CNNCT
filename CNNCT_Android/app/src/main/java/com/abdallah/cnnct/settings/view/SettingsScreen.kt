@@ -24,11 +24,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-private val Lavender = Color(0xFFF1EAF5)   // background
-private val RowGray  = Color(0xFFD1D5DB)   // row background
-private val TextBlack = Color(0xFF111827)  // text/icons
-private val FooterGray = Color(0xFF6B7280) // footer text
+import androidx.compose.material3.MaterialTheme
 
+// Replaced hardcoded palette with MaterialTheme tokens
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
@@ -44,12 +42,12 @@ fun SettingsScreen(
                     Row(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(text = "Settings", color = TextBlack, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                        Text(text = "Settings", color = MaterialTheme.colorScheme.onSurface, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.width(6.dp))
                         Icon(
                             imageVector = Icons.Default.Settings,
                             contentDescription = "Settings Icon",
-                            tint = TextBlack
+                            tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
                 },
@@ -60,7 +58,7 @@ fun SettingsScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Lavender)
+                .background(MaterialTheme.colorScheme.background)
                 // Respect both paddings: from Activity (bottom nav) and our top app bar
                 .padding(contentPadding)
                 .padding(innerPadding)
@@ -89,7 +87,7 @@ fun SettingsScreen(
             ) {
                 Text(
                     text = "CNNCT© 2026",
-                    color = FooterGray,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp
                 )
             }
@@ -108,7 +106,7 @@ private fun SettingRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(RowGray, RoundedCornerShape(cornerRadius))
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(cornerRadius))
             .clickable(onClick = onClick) // ripple on press
             .padding(vertical = verticalPadding, horizontal = horizontalPadding),
         verticalAlignment = Alignment.CenterVertically,
@@ -116,14 +114,14 @@ private fun SettingRow(
     ) {
         Text(
             text = label,
-            color = TextBlack,
+            color = MaterialTheme.colorScheme.onSurface,
             fontSize = 16.sp,
             fontWeight = FontWeight.Medium // medium weight text
         )
         Icon(
             imageVector = Icons.Default.ArrowForward,
             contentDescription = "Go to $label",
-            tint = TextBlack
+            tint = MaterialTheme.colorScheme.onSurface
         )
     }
 }

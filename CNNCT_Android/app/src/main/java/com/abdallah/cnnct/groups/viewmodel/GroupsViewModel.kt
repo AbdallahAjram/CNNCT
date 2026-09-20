@@ -17,7 +17,8 @@ data class GroupsUiState(
     val loading: Boolean = true,
     val userMap: Map<String, String> = emptyMap(),
     val error: String? = null,
-    val currentUserId: String = ""
+    val currentUserId: String = "",
+    val currentUserProfileUrl: String? = null
 )
 
 class GroupsViewModel(
@@ -31,6 +32,13 @@ class GroupsViewModel(
     init {
         try {
             _state.value = _state.value.copy(currentUserId = groupRepo.me())
+            viewModelScope.launch {
+                userRepo.listenMyProfile().collect { profile ->
+                    val authPhoto = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.photoUrl?.toString()
+                    val resolvedUrl = profile?.photoUrl ?: authPhoto
+                    _state.value = _state.value.copy(currentUserProfileUrl = resolvedUrl)
+                }
+            }
             viewModelScope.launch {
                 groupRepo.observeUserGroups().collect { groups ->
                     updateGroupsAndFetchNames(groups)

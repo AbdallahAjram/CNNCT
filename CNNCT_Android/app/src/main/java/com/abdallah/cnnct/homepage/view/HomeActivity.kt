@@ -20,6 +20,7 @@ import androidx.core.content.ContextCompat
 import com.abdallah.cnnct.chat.view.ChatRoute
 import com.google.firebase.auth.FirebaseAuth
 import androidx.compose.ui.platform.LocalContext
+import com.abdallah.cnnct.ui.theme.CNNCTTheme
 
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -41,7 +42,8 @@ class HomeActivity : ComponentActivity() {
         val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: ""
 
         setContent {
-            // --- runtime permission handling on entry ---
+            CNNCTTheme {
+                // --- runtime permission handling on entry ---
             val permissions = remember {
                 mutableStateListOf<String>().apply {
                     // RECORD_AUDIO moved to InCallActivity (JIT)
@@ -148,6 +150,7 @@ class HomeActivity : ComponentActivity() {
                     LaunchedEffect(denied.joinToString()) {
                         Log.w("Permissions", "Denied: ${denied.joinToString()}")
                     }
+                }
                 }
             }
         }

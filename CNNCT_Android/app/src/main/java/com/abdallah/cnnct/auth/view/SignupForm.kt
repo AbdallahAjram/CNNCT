@@ -11,6 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -68,26 +69,43 @@ fun SignupForm(
 
         Spacer(modifier = Modifier.height(32.dp))
 
+        val nameError = name.isNotEmpty() && name.length < 2
         OutlinedTextField(
             value = name,
-            onValueChange = { name = it },
+            onValueChange = { if (it.length <= 30) name = it },
             label = { Text("Full Name") },
             singleLine = true,
+            isError = nameError,
+            supportingText = { 
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(if (nameError) "Name must be at least 2 characters" else "")
+                    Text("${name.length}/30")
+                }
+            },
             modifier = Modifier.fillMaxWidth()
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        val displayNameError = displayName.isNotEmpty() && displayName.length < 3
         OutlinedTextField(
             value = displayName,
-            onValueChange = { displayName = it },
+            onValueChange = { if (it.length <= 30) displayName = it },
             label = { Text("Display Name") },
             singleLine = true,
+            isError = displayNameError,
+            supportingText = { 
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(if (displayNameError) "Display name must be at least 3 characters" else "")
+                    Text("${displayName.length}/30")
+                }
+            },
             modifier = Modifier.fillMaxWidth()
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        val emailError = email.isNotEmpty() && !android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()
         OutlinedTextField(
             value = email,
             onValueChange = { email = it },
@@ -97,12 +115,15 @@ fun SignupForm(
                 imeAction = ImeAction.Next
             ),
             singleLine = true,
+            isError = emailError,
+            supportingText = if (emailError) { { Text("Please enter a valid email address") } } else null,
             modifier = Modifier.fillMaxWidth()
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
         // Phone
+        val phoneError = phoneDigits.isNotEmpty() && phoneDigits.length < 8
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth()
@@ -121,6 +142,8 @@ fun SignupForm(
                 },
                 label = { Text("Phone (03-123456)") },
                 singleLine = true,
+                isError = phoneError,
+                supportingText = if (phoneError) { { Text("Phone number must be 8 digits") } } else null,
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Number,
                     imeAction = ImeAction.Next
@@ -131,6 +154,10 @@ fun SignupForm(
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        val has8Chars = password.length >= 8
+        val hasNumber = password.any { it.isDigit() }
+        val hasSpecial = password.any { !it.isLetterOrDigit() }
+        
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
@@ -148,9 +175,22 @@ fun SignupForm(
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
+        
+        if (password.isNotEmpty()) {
+            Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp, start = 8.dp)) {
+                val successColor = Color(0xFF10B981)
+                val defaultColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                val checkColor = { valid: Boolean -> if (valid) successColor else defaultColor }
+                
+                Text("✓ At least 8 characters", color = checkColor(has8Chars), style = MaterialTheme.typography.bodySmall)
+                Text("✓ Contains a number", color = checkColor(hasNumber), style = MaterialTheme.typography.bodySmall)
+                Text("✓ Contains a special character", color = checkColor(hasSpecial), style = MaterialTheme.typography.bodySmall)
+            }
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        val confirmError = confirmPassword.isNotEmpty() && confirmPassword != password
         OutlinedTextField(
             value = confirmPassword,
             onValueChange = { confirmPassword = it },
@@ -161,11 +201,14 @@ fun SignupForm(
             ),
             visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
             singleLine = true,
+            isError = confirmError,
+            supportingText = if (confirmError) { { Text("Passwords do not match") } } else null,
             modifier = Modifier.fillMaxWidth()
         )
 
         Spacer(modifier = Modifier.height(24.dp))
 
+        val isValid = name.length >= 2 && displayName.length >= 3 && android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() && phoneDigits.length == 8 && has8Chars && hasNumber && hasSpecial && confirmPassword == password
         Button(
             onClick = {
                 onSignupClick(
@@ -177,6 +220,7 @@ fun SignupForm(
                     confirmPassword
                 )
             },
+            enabled = isValid,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp),

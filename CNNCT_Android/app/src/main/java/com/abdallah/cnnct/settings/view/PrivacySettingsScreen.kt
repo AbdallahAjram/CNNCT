@@ -92,7 +92,7 @@ fun PrivacySettingsScreen(onBack: () -> Unit) {
                     modifier = Modifier.fillMaxWidth().height(52.dp)
                 ) {
                     if (isSending) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White, strokeWidth = 2.dp)
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
                     } else {
                         Text("Send Password Reset Email")
                     }

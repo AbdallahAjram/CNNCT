@@ -16,14 +16,14 @@ plugins {
 
 android {
     namespace = "com.abdallah.cnnct"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.abdallah.cnnct"
         minSdk = 24
-        targetSdk = 35
-        versionCode = 9
-        versionName = "1.0.7"
+        targetSdk = 36
+        versionCode = 11
+        versionName = "1.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         val agoraId = localProperties.getProperty("agora.appId") ?: ""

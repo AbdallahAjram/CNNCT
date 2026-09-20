@@ -51,8 +51,8 @@ fun UserAvatar(
     Box(
         modifier = modifier
             .size(size)
-            .clip(CircleShape)
-            .background(Color(0xFFD1D5DB)),
+            .clip(androidx.compose.foundation.shape.CircleShape)
+            .background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center
     ) {
         if (model == null) {

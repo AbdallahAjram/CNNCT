@@ -77,8 +77,7 @@ fun BlockedSettingsScreen(
             .addOnFailureListener { loading = false }
     }
 
-    val FooterGray = Color(0xFF6B7280)
-
+    // Removed hardcoded FooterGray
     // --- Unblock logic ---
     fun unblockUser(peerId: String) {
         scope.launch {
@@ -125,9 +124,10 @@ fun BlockedSettingsScreen(
             when {
                 loading -> CircularProgressIndicator()
                 blockedUsers.isEmpty() -> {
-                    Text(
-                        "You haven't blocked anyone yet.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    com.abdallah.cnnct.ui.components.ActionableEmptyState(
+                        icon = Icons.Default.Block,
+                        title = "No Blocked Users",
+                        description = "You haven't blocked anyone yet."
                     )
                 }
                 else -> {
@@ -162,11 +162,11 @@ fun BlockedSettingsScreen(
                                         Icon(
                                             Icons.Default.Block,
                                             contentDescription = "Unblock",
-                                            tint = Color.Red,
+                                            tint = MaterialTheme.colorScheme.error,
                                             modifier = Modifier.size(16.dp)
                                         )
                                         Spacer(Modifier.width(4.dp))
-                                        Text("Unblock", color = Color.Red)
+                                        Text("Unblock", color = MaterialTheme.colorScheme.error)
                                     }
                                 },
                                 colors = ListItemDefaults.colors(
@@ -186,7 +186,7 @@ fun BlockedSettingsScreen(
                 .padding(bottom = 8.dp),
             contentAlignment = Alignment.Center
         ) {
-            Text("CNNCT© 2026", color = FooterGray, fontSize = 12.sp)
+            Text("CNNCT© 2026", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
     }
 

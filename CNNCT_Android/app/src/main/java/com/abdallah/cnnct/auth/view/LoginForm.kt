@@ -58,11 +58,14 @@ fun LoginForm(
         Spacer(modifier = Modifier.height(32.dp))
 
         // Identifier Field (Email or Phone)
+        val identifierError = identifier.isNotEmpty() && identifier.length < 3
         OutlinedTextField(
             value = identifier,
             onValueChange = { identifier = it },
             label = { Text("Email or Phone (03-123456)") },
             singleLine = true,
+            isError = identifierError,
+            supportingText = if (identifierError) { { Text("Please enter a valid email or phone number") } } else null,
             modifier = Modifier.fillMaxWidth(),
             colors = TextFieldDefaults.colors(
                 focusedContainerColor = MaterialTheme.colorScheme.surface,
@@ -73,11 +76,14 @@ fun LoginForm(
         Spacer(modifier = Modifier.height(16.dp))
 
         // Password Field
+        val passwordError = password.isNotEmpty() && password.length < 6
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
             label = { Text("Password") },
             singleLine = true,
+            isError = passwordError,
+            supportingText = if (passwordError) { { Text("Password must be at least 6 characters") } } else null,
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Password,
                 imeAction = ImeAction.Done
@@ -110,8 +116,10 @@ fun LoginForm(
         Spacer(modifier = Modifier.height(24.dp))
 
         // Login Button
+        val isValid = identifier.length >= 3 && password.length >= 6
         Button(
             onClick = { onLoginClick(identifier.trim(), password) },
+            enabled = isValid,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp),

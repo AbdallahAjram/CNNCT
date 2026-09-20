@@ -84,12 +84,8 @@ class FirestoreChatRepository(
         }
     }
 
-    override suspend fun sendMessage(
-        chatId: String,
-        senderId: String,
-        draft: MessageDraft
-    ) {
-        // 🔐 Only check "I blocked peer" for PRIVATE chats
+    override suspend fun sendMessage(chatId: String, senderId: String, draft: MessageDraft) {
+        // Only check "I blocked peer" for PRIVATE chats
         val chatSnap = chats().document(chatId).get().await()
         val type = chatSnap.getString("type") ?: "private"
         if (type == "private") {
@@ -122,7 +118,7 @@ class FirestoreChatRepository(
                 "createdAtClient"   to Timestamp.now()
             ))
 
-            // ✅ FIXED: Proper summary text for location messages
+
             val summaryText = when (draft.type) {
                 MessageType.text -> draft.text.orEmpty()
                 MessageType.location -> "📍 Location"
@@ -579,6 +575,15 @@ class FirestoreChatRepository(
                 "archivedAt" to FieldValue.delete(),
                 "updatedAt" to now
             )
+        }
+        userChatMeta(userId, chatId).set(data, SetOptions.merge()).await()
+    }
+
+    override suspend fun setPinned(userId: String, chatId: String, pinned: Boolean) {
+        val data = if (pinned) {
+            mapOf("pinned" to true)
+        } else {
+            mapOf("pinned" to FieldValue.delete())
         }
         userChatMeta(userId, chatId).set(data, SetOptions.merge()).await()
     }

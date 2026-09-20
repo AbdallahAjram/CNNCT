@@ -5,9 +5,14 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -19,6 +24,8 @@ import com.abdallah.cnnct.homepage.model.ChatSummary
 import java.text.SimpleDateFormat
 import java.util.*
 import com.abdallah.cnnct.R
+
+import com.abdallah.cnnct.ui.theme.ReadReceiptBlue
 
 private enum class Presence { Online, Offline, Blocked }
 
@@ -36,7 +43,8 @@ fun ChatListItem(
     selectionMode: Boolean = false,
     selected: Boolean = false,
     // NEW
-    muted: Boolean = false
+    muted: Boolean = false,
+    pinned: Boolean = false
 ) {
     val chatName = when (chatSummary.type) {
         "group" -> {
@@ -62,10 +70,11 @@ fun ChatListItem(
         else      -> Presence.Offline
     }
 
+    val customColors = com.abdallah.cnnct.ui.theme.LocalCustomColors.current
     val statusColor = when (presence) {
-        Presence.Blocked -> Color(0xFFFF3B30)
-        Presence.Online  -> Color(0xFF34C759)
-        Presence.Offline -> Color(0xFF9CA3AF)
+        Presence.Blocked -> customColors.presenceBlocked
+        Presence.Online  -> customColors.presenceOnline
+        Presence.Offline -> customColors.presenceOffline
     }
 
     // ---- Selection visuals
@@ -177,6 +186,18 @@ fun ChatListItem(
                                     .size(16.dp)
                             )
                         }
+                        
+                        // tiny pin if pinned
+                        if (pinned) {
+                            Icon(
+                                imageVector = Icons.Filled.PushPin,
+                                contentDescription = "Pinned",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .padding(start = 2.dp, end = 4.dp)
+                                    .size(16.dp)
+                            )
+                        }
 
                         chatSummary.lastMessageTimestamp?.let { ts ->
                             Text(
@@ -217,19 +238,21 @@ fun ChatListItem(
                             val effectiveStatus = chatSummary.lastMessageStatus
                                 ?: if (chatSummary.lastMessageIsRead) "read" else "delivered"
 
-                            val (ticks, tickColor) = when (effectiveStatus) {
-                                "read"      -> "✓✓" to Color(0xFF34B7F1)
-                                "delivered" -> "✓✓" to MaterialTheme.colorScheme.onSurfaceVariant
-                                "sent"      -> "✓"  to MaterialTheme.colorScheme.onSurfaceVariant
-                                else        -> null  to Color.Transparent
+                            val (iconVector, iconColor) = when (effectiveStatus) {
+                                "read"      -> Icons.Default.DoneAll to ReadReceiptBlue
+                                "delivered" -> Icons.Default.DoneAll to MaterialTheme.colorScheme.onSurfaceVariant
+                                "sent"      -> Icons.Default.Done to MaterialTheme.colorScheme.onSurfaceVariant
+                                else        -> null to Color.Transparent
                             }
 
-                            if (ticks != null) {
-                                Text(
-                                    text = ticks,
-                                    color = tickColor,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.padding(start = 8.dp)
+                            if (iconVector != null) {
+                                Icon(
+                                    imageVector = iconVector,
+                                    contentDescription = effectiveStatus,
+                                    tint = iconColor,
+                                    modifier = Modifier
+                                        .padding(start = 8.dp)
+                                        .size(20.dp)
                                 )
                             }
                         }
@@ -258,29 +281,37 @@ fun ChatListItem(
         }
     }
 
+    val animatedBorderColor by androidx.compose.animation.animateColorAsState(targetValue = borderColor, animationSpec = androidx.compose.animation.core.tween(200))
+    val animatedBorderWidth by androidx.compose.animation.core.animateDpAsState(targetValue = borderWidth, animationSpec = androidx.compose.animation.core.tween(200))
+    val animatedElevation by androidx.compose.animation.core.animateDpAsState(targetValue = elevation, animationSpec = androidx.compose.animation.core.tween(200))
+
     val cardModifier = Modifier
         .fillMaxWidth()
         .padding(vertical = 4.dp)
         .then(
-            if (borderWidth > 0.dp)
-                Modifier.border(borderWidth, borderColor, MaterialTheme.shapes.medium)
+            if (animatedBorderWidth > 0.dp)
+                Modifier.border(animatedBorderWidth, animatedBorderColor, MaterialTheme.shapes.medium)
             else Modifier
         )
 
-    if (onClick == null) {
-        Card(
-            modifier = cardModifier,
-            shape = MaterialTheme.shapes.medium,
-            elevation = CardDefaults.cardElevation(defaultElevation = elevation)
-        ) { RowContent() }
-    } else {
-        Card(
-            onClick = onClick,
-            modifier = cardModifier,
-            shape = MaterialTheme.shapes.medium,
-            elevation = CardDefaults.cardElevation(defaultElevation = elevation)
-        ) { RowContent() }
+    val content = @Composable {
+        if (onClick == null) {
+            Card(
+                modifier = cardModifier,
+                shape = MaterialTheme.shapes.medium,
+                elevation = CardDefaults.cardElevation(defaultElevation = animatedElevation)
+            ) { RowContent() }
+        } else {
+            Card(
+                onClick = onClick,
+                modifier = cardModifier,
+                shape = MaterialTheme.shapes.medium,
+                elevation = CardDefaults.cardElevation(defaultElevation = animatedElevation)
+            ) { RowContent() }
+        }
     }
+
+    content()
 }
 
 private fun formatTimestamp(date: Date): String {

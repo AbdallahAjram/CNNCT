@@ -36,9 +36,20 @@ fun InCallScreen(
         }
     }
 
+    val ringingMessages = listOf("Connecting to server...", "Securing audio channel...", "Ringing...")
+    var ringIndex by remember { mutableStateOf(0) }
+    LaunchedEffect(callStatus) {
+        if (callStatus == "ringing") {
+            while(true) {
+                kotlinx.coroutines.delay(1500)
+                ringIndex = (ringIndex + 1) % ringingMessages.size
+            }
+        }
+    }
+
     val (statusLabel, statusColor) = when (callStatus) {
-        "in-progress" -> "Live" to Color(0xFF10B981)      // green
-        "ringing" -> "Ringing…" to MaterialTheme.colorScheme.primary
+        "in-progress" -> "Live" to MaterialTheme.colorScheme.primary
+        "ringing" -> ringingMessages[ringIndex] to MaterialTheme.colorScheme.primary
         "rejected" -> "Declined" to MaterialTheme.colorScheme.error
         "missed" -> "Missed" to MaterialTheme.colorScheme.error
         "ended" -> "Ended" to MaterialTheme.colorScheme.outline
